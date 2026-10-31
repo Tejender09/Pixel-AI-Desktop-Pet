@@ -148,98 +148,88 @@ class SpeechBubbleWidget(QWidget):
             return
 
         painter = QPainter(self)
-        # Sharp pixelated/blocky style - no blurry or anti-aliased seam lines!
+        # 100% Sharp Pixel Art Rendering - No anti-aliasing or blurring!
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         painter.setOpacity(self.opacity)
 
-        # Subtle floating hover wave
-        float_y = int(math.sin(self.anim_tick * 0.1) * 1.5)
+        # Chunky pixel art unit: 2 screen pixels per retro pixel block
+        P = 2
+
+        # Floating drift snapped to pixel grid
+        float_y = int(math.sin(self.anim_tick * 0.1) * 2.0)
 
         # Transform for elastic pop-in scale from bottom-center
-        cx = self.width() / 2.0
-        by_anchor = self.height() - 8.0
+        cx = self.width() // 2
+        by_anchor = self.height() - 8
         painter.translate(cx, by_anchor)
         painter.scale(self.scale, self.scale)
         painter.translate(-cx, -by_anchor)
 
-        # Blocky Pixel Art Geometry
-        bx = 12.0
-        by = float(6 + float_y)
-        bw = float(self.width() - 24)
-        bh = float(self.bubble_h)
+        # Geometry snapped to pixel grid
+        x = 12
+        y = 6 + float_y
+        bw = ((self.width() - 24) // P) * P
+        bh = (self.bubble_h // P) * P
 
-        border_w = 2.0
-        notch = 4.0  # Stepped pixel corner notch
+        # Tail positioned to point down toward cat's head
+        tail_rel = int(bw * 0.35 if not self.pet.facing_right else bw * 0.65)
+        tail_cx = ((x + tail_rel) // P) * P
 
-        # Pointed triangle tail pointing down towards cat's head
-        tw = 14.0  # tail width at base
-        th = 9.0   # tail height
-        tail_cx = bx + (bw * 0.38 if not self.pet.facing_right else bw * 0.62)
-
-        # Outer blocky polygon contour (entire outer boundary including stepped corners and tail)
-        outer_poly = QPolygonF([
-            QPointF(bx + notch, by),
-            QPointF(bx + bw - notch, by),
-            QPointF(bx + bw, by + notch),
-            QPointF(bx + bw, by + bh - notch),
-            QPointF(bx + bw - notch, by + bh),
-            QPointF(tail_cx + tw / 2.0, by + bh),
-            QPointF(tail_cx, by + bh + th),  # Pointed tip
-            QPointF(tail_cx - tw / 2.0, by + bh),
-            QPointF(bx + notch, by + bh),
-            QPointF(bx, by + bh - notch),
-            QPointF(bx, by + notch),
-        ])
-
-        # Inner blocky polygon contour (inset by border_w, guarantees ZERO seam/line at joint)
-        ibx, iby = bx + border_w, by + border_w
-        ibw, ibh = bw - border_w * 2.0, bh - border_w * 2.0
-        inot = max(1.0, notch - border_w)
-        itw = tw - border_w * 2.0
-        ith = th - border_w
-
-        inner_poly = QPolygonF([
-            QPointF(ibx + inot, iby),
-            QPointF(ibx + ibw - inot, iby),
-            QPointF(ibx + ibw, iby + inot),
-            QPointF(ibx + ibw, iby + ibh - inot),
-            QPointF(ibx + ibw - inot, iby + ibh),
-            QPointF(tail_cx + itw / 2.0, iby + ibh),
-            QPointF(tail_cx, iby + ibh + ith),
-            QPointF(tail_cx - itw / 2.0, iby + ibh),
-            QPointF(ibx + inot, iby + ibh),
-            QPointF(ibx, iby + ibh - inot),
-            QPointF(ibx, iby + inot),
-        ])
-
-        # 1. Pixel Art Drop Shadow (blocky offset, no blur)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 70))
-        painter.save()
-        painter.translate(3.0, 3.0)
-        painter.drawPolygon(outer_poly)
-        painter.restore()
-
-        # 2. Blocky Pixel Border
         border_hex = self.pet.config.get("visuals", {}).get("bubble_border_color", "#1A1C23")
-        painter.setBrush(QColor(border_hex))
-        painter.drawPolygon(outer_poly)
-
-        # 3. Inner Fill (solid crisp background, seamless joint!)
+        border_c = QColor(border_hex)
         bg_hex = self.pet.config.get("visuals", {}).get("bubble_color", "#FFFFFF")
-        painter.setBrush(QColor(bg_hex))
-        painter.drawPolygon(inner_poly)
+        bg_c = QColor(bg_hex)
+        shadow_c = QColor(0, 0, 0, 75)
 
-        # 4. Clean Monospace/Blocky Typography
+        # Helper to draw the authentic stepped pixel balloon silhouette
+        def draw_pixel_silhouette(p, ox, oy, fill_color):
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(fill_color)
+            # Main box body & stepped pixel corners
+            p.drawRect(ox, oy + 2 * P, bw, bh - 4 * P)
+            p.drawRect(ox + P, oy + P, bw - 2 * P, bh - 2 * P)
+            p.drawRect(ox + 2 * P, oy, bw - 4 * P, bh)
+            # Stepped pointed tail (4 descending chunky pixel steps)
+            tx = ox + (tail_cx - x)
+            ty = oy + bh
+            p.drawRect(tx - 3 * P, ty, 7 * P, P)
+            p.drawRect(tx - 2 * P, ty + P, 5 * P, P)
+            p.drawRect(tx - 1 * P, ty + 2 * P, 3 * P, P)
+            p.drawRect(tx, ty + 3 * P, P, P)
+
+        # 1. Pixel Art Drop Shadow (blocky offset, unblurred)
+        draw_pixel_silhouette(painter, x + 2 * P, y + 2 * P, shadow_c)
+
+        # 2. Outer Pixel Border (chunky 2px solid dark outline)
+        draw_pixel_silhouette(painter, x, y, border_c)
+
+        # 3. Inner Fill (solid background overlapping the junction seamlessly - ZERO seam line!)
+        ibx = x + P
+        iby = y + P
+        ibw = bw - 2 * P
+        ibh = bh - 2 * P
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bg_c)
+        painter.drawRect(ibx, iby + 2 * P, ibw, ibh - 4 * P)
+        painter.drawRect(ibx + P, iby + P, ibw - 2 * P, ibh - 2 * P)
+        painter.drawRect(ibx + 2 * P, iby, ibw - 4 * P, ibh)
+        # Inner tail cutting seamlessly through the outer border
+        tx = tail_cx
+        ty = y + bh
+        painter.drawRect(tx - 2 * P, ty - P, 5 * P, 2 * P)
+        painter.drawRect(tx - 1 * P, ty + P, 3 * P, P)
+        painter.drawRect(tx, ty + 2 * P, P, P)
+
+        # 4. Pixelated Typography
         font_size = self.pet.config.get("visuals", {}).get("bubble_font_size", 10)
         font = QFont("Consolas", font_size, QFont.Weight.Bold)
         font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
         painter.setFont(font)
 
         text_hex = self.pet.config.get("visuals", {}).get("bubble_text_color", "#1A1C23")
         painter.setPen(QColor(text_hex))
-        painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, self.text)
+        painter.drawText(QRect(x, y, bw, bh), Qt.AlignmentFlag.AlignCenter, self.text)
 
 
 class AnimationManager:
@@ -853,68 +843,58 @@ class PetWindow(QWidget):
         bx = float((self.width() - int(bw)) // 2)
         by = float(max(4, hitbox.y() - int(bh) - 8))
 
-        border_w = 2.0
-        notch = 4.0
-        tw = 12.0
-        th = 8.0
-        tail_cx = bx + (bw * 0.38 if not self.facing_right else bw * 0.62)
+        P = 2
+        x = int(bx)
+        y = int(by)
+        bw_i = int(bw // P * P)
+        bh_i = int(bh // P * P)
+        tail_cx = int(x + (bw_i * 0.38 if not self.facing_right else bw_i * 0.62))
 
-        outer_poly = QPolygonF([
-            QPointF(bx + notch, by),
-            QPointF(bx + bw - notch, by),
-            QPointF(bx + bw, by + notch),
-            QPointF(bx + bw, by + bh - notch),
-            QPointF(bx + bw - notch, by + bh),
-            QPointF(tail_cx + tw / 2.0, by + bh),
-            QPointF(tail_cx, by + bh + th),
-            QPointF(tail_cx - tw / 2.0, by + bh),
-            QPointF(bx + notch, by + bh),
-            QPointF(bx, by + bh - notch),
-            QPointF(bx, by + notch),
-        ])
+        border_c = QColor(self.config.get("visuals", {}).get("bubble_border_color", "#1A1C23"))
+        bg_c = QColor(self.config.get("visuals", {}).get("bubble_color", "#FFFFFF"))
+        shadow_c = QColor(0, 0, 0, 75)
 
-        ibx, iby = bx + border_w, by + border_w
-        ibw, ibh = bw - border_w * 2.0, bh - border_w * 2.0
-        inot = max(1.0, notch - border_w)
-        itw = tw - border_w * 2.0
-        ith = th - border_w
+        def draw_pixel_silhouette(p, ox, oy, fill_color):
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(fill_color)
+            p.drawRect(ox, oy + 2 * P, bw_i, bh_i - 4 * P)
+            p.drawRect(ox + P, oy + P, bw_i - 2 * P, bh_i - 2 * P)
+            p.drawRect(ox + 2 * P, oy, bw_i - 4 * P, bh_i)
+            tx = ox + (tail_cx - x)
+            ty = oy + bh_i
+            p.drawRect(tx - 3 * P, ty, 7 * P, P)
+            p.drawRect(tx - 2 * P, ty + P, 5 * P, P)
+            p.drawRect(tx - 1 * P, ty + 2 * P, 3 * P, P)
+            p.drawRect(tx, ty + 3 * P, P, P)
 
-        inner_poly = QPolygonF([
-            QPointF(ibx + inot, iby),
-            QPointF(ibx + ibw - inot, iby),
-            QPointF(ibx + ibw, iby + inot),
-            QPointF(ibx + ibw, iby + ibh - inot),
-            QPointF(ibx + ibw - inot, iby + ibh),
-            QPointF(tail_cx + itw / 2.0, iby + ibh),
-            QPointF(tail_cx, iby + ibh + ith),
-            QPointF(tail_cx - itw / 2.0, iby + ibh),
-            QPointF(ibx + inot, iby + ibh),
-            QPointF(ibx, iby + ibh - inot),
-            QPointF(ibx, iby + inot),
-        ])
+        # 1. Shadow
+        draw_pixel_silhouette(painter, x + 2 * P, y + 2 * P, shadow_c)
 
-        # Shadow
+        # 2. Border
+        draw_pixel_silhouette(painter, x, y, border_c)
+
+        # 3. Inner Fill
+        ibx = x + P
+        iby = y + P
+        ibw = bw_i - 2 * P
+        ibh = bh_i - 2 * P
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 60))
-        painter.save()
-        painter.translate(2.0, 2.0)
-        painter.drawPolygon(outer_poly)
-        painter.restore()
+        painter.setBrush(bg_c)
+        painter.drawRect(ibx, iby + 2 * P, ibw, ibh - 4 * P)
+        painter.drawRect(ibx + P, iby + P, ibw - 2 * P, ibh - 2 * P)
+        painter.drawRect(ibx + 2 * P, iby, ibw - 4 * P, ibh)
+        tx = tail_cx
+        ty = y + bh_i
+        painter.drawRect(tx - 2 * P, ty - P, 5 * P, 2 * P)
+        painter.drawRect(tx - 1 * P, ty + P, 3 * P, P)
+        painter.drawRect(tx, ty + 2 * P, P, P)
 
-        # Border
-        border_hex = self.config.get("visuals", {}).get("bubble_border_color", "#1A1C23")
-        painter.setBrush(QColor(border_hex))
-        painter.drawPolygon(outer_poly)
-
-        # Fill
-        bg_hex = self.config.get("visuals", {}).get("bubble_color", "#FFFFFF")
-        painter.setBrush(QColor(bg_hex))
-        painter.drawPolygon(inner_poly)
-
-        # Text
+        # 4. Text
+        font.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
+        painter.setFont(font)
         text_hex = self.config.get("visuals", {}).get("bubble_text_color", "#1A1C23")
         painter.setPen(QColor(text_hex))
-        painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, text)
+        painter.drawText(QRect(x, y, bw_i, bh_i), Qt.AlignmentFlag.AlignCenter, text)
         painter.restore()
 
     # -------------------------------------------------------------
