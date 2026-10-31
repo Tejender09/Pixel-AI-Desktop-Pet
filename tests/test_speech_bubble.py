@@ -54,3 +54,4 @@ def test_speech_bubble_functionality():
 
 if __name__ == "__main__":
     test_speech_bubble_functionality()
+
