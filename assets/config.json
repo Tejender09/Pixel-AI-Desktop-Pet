@@ -1,0 +1,5 @@
+{
+  "idle": { "fps": 2, "loop": true, "files": ["idle_01.png", "idle_02.png"] },
+  "walk": { "fps": 8, "loop": true, "files": ["walk_01.png", "walk_02.png", "walk_03.png"] },
+  "react": { "fps": 4, "loop": false, "files": ["surprise.png"] }
+}
