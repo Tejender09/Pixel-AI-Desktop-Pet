@@ -6,6 +6,12 @@ from PyQt6.QtWidgets import QApplication, QWidget, QMenu
 from PyQt6.QtCore import Qt, QPoint, QTimer, QRect
 from PyQt6.QtGui import QPainter, QColor, QPixmap, QTransform, QCursor
 
+# Import ContextEngine with fallback
+try:
+    from context_engine import ContextEngine
+except ImportError:
+    from src.context_engine import ContextEngine
+
 # Import generator to create sprites on-the-fly if missing
 try:
     from generate_sprites import generate_all_sprites
@@ -253,6 +259,10 @@ class PetWindow(QWidget):
         self.eye_shift_x = 0
         self.eye_shift_y = 0
 
+        # Context Brain
+        self.brain = ContextEngine()
+        self.current_context_mood = "NEUTRAL"
+
         # Requirement 3: Heartbeat QTimer (30ms ~ 33 FPS)
         self.heartbeat = QTimer(self)
         self.heartbeat.timeout.connect(self.update_logic)
@@ -319,6 +329,26 @@ class PetWindow(QWidget):
         # 4. Mouse Position & Eye Tracking Vector
         cursor_global = QCursor.pos()
         cursor_local = self.mapFromGlobal(cursor_global)
+
+        # --- Brain Context Check (sampled every ~0.6s to conserve CPU) ---
+        if self.frame_count % 20 == 0:
+            context_mood = self.brain.analyze_context()
+            if context_mood:
+                self.current_context_mood = context_mood
+                print(f"🧠 Pet noticed context change: {context_mood}")
+
+                # Map context mood to physical behavior
+                if context_mood == "CURIOUS":
+                    self.trigger_reaction()
+                elif context_mood == "FOCUSED":
+                    # While coding/working, pet wanders slowly and calm
+                    self.walk_speed = 0.8
+                elif context_mood == "HAPPY":
+                    self.trigger_reaction()
+                elif context_mood == "NEUTRAL":
+                    self.walk_speed = 2.0
+        # ---------------------------
+
         hitbox = self.get_grounded_hitbox()
         face_center_x = hitbox.x() + hitbox.width() // 2
         face_center_y = hitbox.y() + int(hitbox.height() * 0.4)
