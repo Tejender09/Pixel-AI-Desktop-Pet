@@ -41,3 +41,7 @@ ENV/
 .coverage
 htmlcov/
 
+# User data & persistent memory
+user_data/
+
+

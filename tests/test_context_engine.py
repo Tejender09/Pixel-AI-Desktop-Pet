@@ -29,3 +29,4 @@ if __name__ == "__main__":
     test_context_engine_initialization()
     test_get_active_window_info()
     test_analyze_context()
+

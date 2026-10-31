@@ -12,6 +12,12 @@ try:
 except ImportError:
     from src.context_engine import ContextEngine
 
+# Import MemoryStore with fallback
+try:
+    from memory_store import MemoryStore
+except ImportError:
+    from src.memory_store import MemoryStore
+
 # Import generator to create sprites on-the-fly if missing
 try:
     from generate_sprites import generate_all_sprites
@@ -25,6 +31,9 @@ class PetState:
     REACTING = "REACTING"
     SATED = "SATED"
     SLEEPING = "SLEEPING"
+    WATCHING = "WATCHING"  # Option A: Watching movies/videos with user
+    WORRIED = "WORRIED"    # Option A: Nervous/anxious when errors/bugs occur
+    GROOVING = "GROOVING"  # Option A: Dancing along with music/Spotify
 
 
 class AnimationManager:
@@ -44,7 +53,10 @@ class AnimationManager:
             PetState.WALKING: [],
             PetState.REACTING: [],
             PetState.SATED: [],
-            PetState.SLEEPING: []
+            PetState.SLEEPING: [],
+            PetState.WORRIED: [],
+            PetState.WATCHING: [],
+            PetState.GROOVING: []
         }
         # Cache for tracked frames: (state, frame_idx, shift_x, shift_y) -> QPixmap
         self.tracked_cache = {}
@@ -63,7 +75,10 @@ class AnimationManager:
             PetState.WALKING: ["walk", "walk_sheet.png", "Black-Run.png"],
             PetState.REACTING: ["react", "react_sheet.png", "01.png"],
             PetState.SATED: ["sated", "sated_sheet.png"],
-            PetState.SLEEPING: ["sleep", "sleep_sheet.png"]
+            PetState.SLEEPING: ["sleep", "sleep_sheet.png"],
+            PetState.WORRIED: ["worried", "worried_sheet.png"],
+            PetState.WATCHING: ["watching", "watching_sheet.png"],
+            PetState.GROOVING: ["grooving", "grooving_sheet.png"]
         }
 
         for state, lookups in state_folder_map.items():
@@ -118,11 +133,6 @@ class AnimationManager:
             print(f"Loaded {len(frames)} frames for {state}")
 
     def _create_tracked_frame(self, base_pixmap: QPixmap, shift_x: int, shift_y: int) -> QPixmap:
-        """
-        Dynamically applies pupil position inside the sprite's white eye sockets
-        at the 32x32 pixel level. This guarantees the pupil is part of the sprite,
-        perfectly locked to head movement, and strictly on the pixel grid.
-        """
         img = base_pixmap.toImage()
 
         # Find eye socket pixels in upper portion of sprite (y < 22)
@@ -130,7 +140,6 @@ class AnimationManager:
         for y in range(0, min(22, img.height())):
             for x in range(img.width()):
                 c = img.pixelColor(x, y)
-                # Socket white (rgb > 240) or existing pupil dark (rgb < 60)
                 if (c.red() > 240 and c.green() > 240 and c.blue() > 240) or \
                    (c.red() < 60 and c.green() < 60 and c.blue() < 60 and c.alpha() > 200):
                     eye_pixels.append((x, y))
@@ -152,17 +161,14 @@ class AnimationManager:
             min_y = min(p[1] for p in e)
             max_y = max(p[1] for p in e)
 
-            # Clear socket back to solid white
             for py in range(min_y, max_y + 1):
                 for px in range(min_x, max_x + 1):
                     if (px, py) in e:
                         img.setPixelColor(px, py, white_color)
 
-            # Center of socket
             cx = (min_x + max_x) // 2
             cy = (min_y + max_y) // 2
 
-            # Place 2x2 pupil with shift, clamped so it stays inside socket
             px = max(min_x, min(max_x - 1, cx + shift_x))
             py = max(min_y, min(max_y - 1, cy + shift_y))
 
@@ -185,16 +191,18 @@ class AnimationManager:
             PetState.WALKING: 6,
             PetState.REACTING: 5,
             PetState.SATED: 8,
-            PetState.SLEEPING: 16
+            PetState.SLEEPING: 16,
+            PetState.WORRIED: 6,
+            PetState.WATCHING: 14,
+            PetState.GROOVING: 7
         }
         speed = speed_map.get(state, 8)
         idx = (frame_count // speed) % len(frames)
 
-        # In SLEEPING and SATED states, eyes are closed lines (^.^ or - -)
-        if state in [PetState.SLEEPING, PetState.SATED]:
+        # In SLEEPING, SATED, and GROOVING states, eyes are styled lines (^.^, - -, ♪)
+        if state in [PetState.SLEEPING, PetState.SATED, PetState.GROOVING]:
             return frames[idx]
 
-        # Use cached pixel-tracked frame
         cache_key = (state, idx, shift_x, shift_y)
         if cache_key not in self.tracked_cache:
             self.tracked_cache[cache_key] = self._create_tracked_frame(frames[idx], shift_x, shift_y)
@@ -205,7 +213,7 @@ class PetWindow(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Requirement 1: Frameless, stays-on-top, translucent background, fixed 200x200
+        # Frameless, stays-on-top, translucent background, fixed 200x200
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
@@ -216,11 +224,10 @@ class PetWindow(QWidget):
         self.setFixedSize(200, 200)
         self.setMouseTracking(True)
 
-        # Asset loading with portable directory resolution
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets"))
         self.animator = AnimationManager(base_dir)
 
-        # Initial positioning
+        # Position pet on screen
         screen = QApplication.primaryScreen().availableGeometry()
         init_x = min(300, max(50, screen.width() - 250))
         init_y = min(300, max(50, screen.height() - 250))
@@ -237,14 +244,16 @@ class PetWindow(QWidget):
         # Mouse Dragging state
         self.is_dragging = False
         self.drag_offset = QPoint(0, 0)
+        self.last_mouse_pos = QCursor.pos()
+        self.mouse_idle_ticks = 0
 
         # Reaction & Pop animation timers
         self.reaction_frames = 0
         self.pop_animation_frames = 0
 
         # Needs system: Hunger & Happiness
-        self.hunger = 15      # 0 to 100 (increases over time)
-        self.happiness = 85   # 0 to 100 (decreases slowly over time)
+        self.hunger = 15      # 0 to 100
+        self.happiness = 85   # 0 to 100
         self.sleep_timer = 0
 
         # Animation "Juice" variables
@@ -259,11 +268,12 @@ class PetWindow(QWidget):
         self.eye_shift_x = 0
         self.eye_shift_y = 0
 
-        # Context Brain
+        # Cognition, Sight & Memory Engines
         self.brain = ContextEngine()
+        self.memory = MemoryStore()
         self.current_context_mood = "NEUTRAL"
 
-        # Requirement 3: Heartbeat QTimer (30ms ~ 33 FPS)
+        # Heartbeat QTimer (30ms ~ 33 FPS)
         self.heartbeat = QTimer(self)
         self.heartbeat.timeout.connect(self.update_logic)
         self.heartbeat.start(30)
@@ -272,10 +282,6 @@ class PetWindow(QWidget):
     # Hitbox & Geometry
     # -------------------------------------------------------------
     def get_hitbox(self) -> QRect:
-        """
-        Requirement 3: Accurate interaction hitbox matching the scaled
-        and bounced sprite position in local widget coordinates.
-        """
         sw = int(128 * self.scale_factor * self.squash_stretch_x)
         sh = int(128 * self.scale_factor * self.squash_stretch_y)
         x = (self.width() - sw) // 2
@@ -283,10 +289,6 @@ class PetWindow(QWidget):
         return QRect(x, y, sw, sh)
 
     def get_grounded_hitbox(self) -> QRect:
-        """
-        Grounded hitbox (without vertical bounce) used for hover detection
-        to prevent jumping jitter when the mouse rests over the pet.
-        """
         sw = int(128 * self.scale_factor)
         sh = int(128 * self.scale_factor)
         x = (self.width() - sw) // 2
@@ -326,53 +328,77 @@ class PetWindow(QWidget):
             if self.reaction_frames <= 0 and not self.is_dragging:
                 self.state = PetState.IDLE
 
-        # 4. Mouse Position & Eye Tracking Vector
-        cursor_global = QCursor.pos()
-        cursor_local = self.mapFromGlobal(cursor_global)
+        # 4. Memory Tracking & Active App Recording (every 1 second ~ 33 frames)
+        if self.frame_count % 33 == 0:
+            info = self.brain.get_active_window_info()
+            proc = info.get("process", "")
+            if proc:
+                self.memory.record_app_time(proc, seconds=1)
 
-        # --- Brain Context Check (sampled every ~0.6s to conserve CPU) ---
-        if self.frame_count % 20 == 0:
+        # Periodic memory auto-save (every ~60s)
+        if self.frame_count % 1800 == 0:
+            self.memory.save()
+
+        # 5. Semantic Context & Mood Detection (sampled every ~0.6s)
+        if self.frame_count % 20 == 0 and not self.is_dragging and self.state != PetState.SLEEPING:
             context_mood = self.brain.analyze_context()
             if context_mood:
                 self.current_context_mood = context_mood
                 print(f"🧠 Pet noticed context change: {context_mood}")
 
-                # Map context mood to physical behavior
-                if context_mood == "CURIOUS":
-                    self.trigger_reaction()
+                # Behavioral Mapping (Option A)
+                if context_mood == "WATCHING":
+                    self.state = PetState.WATCHING
+                elif context_mood == "WORRIED":
+                    self.state = PetState.WORRIED
+                elif context_mood == "GROOVING":
+                    self.state = PetState.GROOVING
                 elif context_mood == "FOCUSED":
-                    # While coding/working, pet wanders slowly and calm
                     self.walk_speed = 0.8
-                elif context_mood == "HAPPY":
+                elif context_mood == "CURIOUS":
                     self.trigger_reaction()
                 elif context_mood == "NEUTRAL":
                     self.walk_speed = 2.0
-        # ---------------------------
+                    if self.state in [PetState.WATCHING, PetState.WORRIED, PetState.GROOVING]:
+                        self.state = PetState.IDLE
 
+        # 6. Mouse Tracking & Window Gaze Sight (Option B)
+        cursor_global = QCursor.pos()
+        if cursor_global == self.last_mouse_pos:
+            self.mouse_idle_ticks += 1
+        else:
+            self.mouse_idle_ticks = 0
+            self.last_mouse_pos = cursor_global
+
+        cursor_local = self.mapFromGlobal(cursor_global)
         hitbox = self.get_grounded_hitbox()
         face_center_x = hitbox.x() + hitbox.width() // 2
         face_center_y = hitbox.y() + int(hitbox.height() * 0.4)
 
-        dx = cursor_local.x() - face_center_x
-        dy = cursor_local.y() - face_center_y
+        # If mouse is idle for > 2 seconds, pet gazes toward the center of the active window
+        gaze_point = cursor_local
+        if self.mouse_idle_ticks > 60:
+            win_center = self.brain.get_window_center()
+            if win_center:
+                gaze_point = self.mapFromGlobal(QPoint(win_center[0], win_center[1]))
 
-        # Screen-space direction: -1 (left), 0 (center), +1 (right)
+        dx = gaze_point.x() - face_center_x
+        dy = gaze_point.y() - face_center_y
+
         screen_sx = -1 if dx < -25 else (1 if dx > 25 else 0)
         self.eye_shift_y = -1 if dy < -25 else (1 if dy > 25 else 0)
-        
-        # When sprite is horizontally flipped, invert x so eyes look toward mouse
         self.eye_shift_x = screen_sx if self.facing_right else -screen_sx
 
-        # 5. Hover Detection
+        # 7. Hover Detection
         is_hovered = hitbox.contains(cursor_local)
         if is_hovered and not self.is_dragging:
-            if self.state in [PetState.IDLE, PetState.WALKING]:
+            if self.state in [PetState.IDLE, PetState.WALKING, PetState.WATCHING, PetState.GROOVING]:
                 self.trigger_reaction()
 
-        # 6. Procedural Animation "Juice" (Sine Waves & Dynamic Scaling)
+        # 8. Procedural Animation "Juice"
         self.update_animation_juice()
 
-        # 7. AI Behavior & Movement
+        # 9. Spatial AI & Wandering
         if not self.is_dragging:
             if self.state == PetState.IDLE:
                 self.idle_counter += 1
@@ -384,28 +410,21 @@ class PetWindow(QWidget):
         self.update()
 
     def update_animation_juice(self):
-        """
-        Calculates vertical bob, jump bounce, squash/stretch, and dynamic scaling
-        using continuous sine waves and easing equations.
-        """
         t = self.frame_count
 
         if self.state == PetState.IDLE:
-            # Subtle breathing vertical bob (2-3px)
             self.target_scale = 1.0
             self.bounce_y = math.sin(t * 0.08) * 3.0
             self.squash_stretch_x = 1.0 + math.sin(t * 0.08) * 0.015
             self.squash_stretch_y = 1.0 - math.sin(t * 0.08) * 0.015
 
         elif self.state == PetState.WALKING:
-            # Rhythmic, obvious vertical bobbing (paws taking strides)
             self.target_scale = 1.0
             self.bounce_y = abs(math.sin(t * 0.25)) * 8.0
             self.squash_stretch_x = 1.0 + math.sin(t * 0.5) * 0.03
             self.squash_stretch_y = 1.0 - math.sin(t * 0.5) * 0.03
 
         elif self.state == PetState.REACTING:
-            # High, energetic jump triggered by hover or play
             jump_cycle = math.sin((40 - max(0, self.reaction_frames)) / 40.0 * math.pi)
             self.bounce_y = jump_cycle * 28.0
             stretch = (jump_cycle - 0.5) * 0.15
@@ -414,7 +433,6 @@ class PetWindow(QWidget):
             self.target_scale = 1.1
 
         elif self.state == PetState.SATED:
-            # Happy "pop" animation and gentle sway
             pop_ratio = max(0, self.pop_animation_frames) / 50.0
             pop_wave = math.sin(pop_ratio * math.pi * 3) * (pop_ratio * 0.2)
             self.target_scale = 1.0 + pop_wave
@@ -423,35 +441,67 @@ class PetWindow(QWidget):
             self.squash_stretch_y = 1.0
 
         elif self.state == PetState.SLEEPING:
-            # Sleeping: reduced scale, very slow deep breathing, no movement
             self.target_scale = 0.85
             self.bounce_y = math.sin(t * 0.04) * 1.5
             self.squash_stretch_x = 1.0 + math.sin(t * 0.04) * 0.02
             self.squash_stretch_y = 1.0 - math.sin(t * 0.04) * 0.02
 
-        # Smooth dynamic scale easing
+        elif self.state == PetState.WORRIED:
+            # Anxious jitter and tense shivering
+            self.target_scale = 0.95
+            self.bounce_y = math.sin(t * 0.8) * 1.5
+            self.squash_stretch_x = 1.0 + math.sin(t * 0.8) * 0.02
+            self.squash_stretch_y = 1.0 - math.sin(t * 0.8) * 0.02
+
+        elif self.state == PetState.WATCHING:
+            # Relaxed sitting cinema companion
+            self.target_scale = 1.02
+            self.bounce_y = math.sin(t * 0.05) * 2.0
+            self.squash_stretch_x = 1.0
+            self.squash_stretch_y = 1.0
+
+        elif self.state == PetState.GROOVING:
+            # Energetic dance bobbing
+            self.target_scale = 1.05
+            self.bounce_y = abs(math.sin(t * 0.35)) * 10.0
+            self.squash_stretch_x = 1.0 + math.sin(t * 0.35) * 0.04
+            self.squash_stretch_y = 1.0 - math.sin(t * 0.35) * 0.04
+
         self.scale_factor += (self.target_scale - self.scale_factor) * 0.12
 
     # -------------------------------------------------------------
-    # AI Navigation & Wandering
+    # Spatial AI Navigation & Active Window Perching (Option B)
     # -------------------------------------------------------------
     def start_wandering(self):
         screen = QApplication.primaryScreen().availableGeometry()
-        margin = 150
-        min_x = max(20, screen.x() + margin)
-        max_x = min(screen.width() - margin - 200, screen.x() + screen.width() - margin)
-        min_y = max(20, screen.y() + margin)
-        max_y = min(screen.height() - margin - 200, screen.y() + screen.height() - margin)
+        
+        # 70% chance to perch near the active user window if one is open
+        perch_target = None
+        if random.random() < 0.70:
+            perch_target = self.brain.get_perch_target(
+                screen.width(), screen.height(), self.width(), self.height()
+            )
 
-        if max_x <= min_x:
-            max_x = min_x + 100
-        if max_y <= min_y:
-            max_y = min_y + 100
+        if perch_target:
+            self.target_pos = QPoint(perch_target[0], perch_target[1])
+        else:
+            # Fall back to free wandering within screen bounds
+            margin = 150
+            min_x = max(20, screen.x() + margin)
+            max_x = min(screen.width() - margin - 200, screen.x() + screen.width() - margin)
+            min_y = max(20, screen.y() + margin)
+            max_y = min(screen.height() - margin - 200, screen.y() + screen.height() - margin)
 
-        self.target_pos = QPoint(
-            random.randint(min_x, max_x),
-            random.randint(min_y, max_y)
-        )
+            if max_x <= min_x:
+                max_x = min_x + 100
+            if max_y <= min_y:
+                max_y = min_y + 100
+
+            self.target_pos = QPoint(
+                random.randint(min_x, max_x),
+                random.randint(min_y, max_y)
+            )
+
         self.state = PetState.WALKING
         self.idle_counter = 0
         self.idle_target_time = random.randint(120, 260)
@@ -464,7 +514,11 @@ class PetWindow(QWidget):
         dist = math.hypot(dx, dy)
 
         if dist < self.walk_speed * 2.0:
-            self.state = PetState.IDLE
+            # Return to context mood or IDLE upon arrival
+            if self.current_context_mood in [PetState.WATCHING, PetState.WORRIED, PetState.GROOVING]:
+                self.state = self.current_context_mood
+            else:
+                self.state = PetState.IDLE
             self.move(tar_x, tar_y)
             return
 
@@ -489,7 +543,6 @@ class PetWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        # Retrieve sprite with pixel-perfect eye tracking baked in at 32x32 resolution
         sprite = self.animator.get_frame(
             self.state,
             self.frame_count,
@@ -502,18 +555,15 @@ class PetWindow(QWidget):
             sw = hitbox.width()
             sh = hitbox.height()
 
-            # Nearest-neighbor sharp 32x32 -> 128x128 pixel art scaling
             scaled = sprite.scaled(
                 sw, sh,
                 Qt.AspectRatioMode.IgnoreAspectRatio,
                 Qt.TransformationMode.FastTransformation
             )
 
-            # Horizontal sprite flipping: flips body and eyes in unison
             if not self.facing_right:
                 scaled = scaled.transformed(QTransform().scale(-1, 1))
 
-            # Draw the unified sprite at the exact hitbox position
             painter.drawPixmap(hitbox.x(), hitbox.y(), scaled)
         else:
             self.draw_fallback_cat(painter, hitbox)
@@ -584,8 +634,13 @@ class PetWindow(QWidget):
             }
         """)
 
+        # Needs status header
         status_action = menu.addAction(f"Hunger: {self.hunger}%  |  Happiness: {self.happiness}%")
         status_action.setEnabled(False)
+
+        # Bonding & Memory header (Option C)
+        bond_action = menu.addAction(f"❤️ Bond: {self.memory.bond_level}%  |  ⭐ Fav: {self.memory.get_favorite_app()}")
+        bond_action.setEnabled(False)
         menu.addSeparator()
 
         feed_action = menu.addAction("Feed 🍎")
@@ -610,7 +665,7 @@ class PetWindow(QWidget):
             else:
                 self.make_pet_sleep()
         elif action == exit_action:
-            QApplication.quit()
+            self.close()
 
     # -------------------------------------------------------------
     # Needs System Actions
@@ -621,6 +676,7 @@ class PetWindow(QWidget):
         self.state = PetState.SATED
         self.pop_animation_frames = 50
         self.target_scale = 1.35
+        self.memory.record_interaction("feed")
         print(f"Fed pet! Hunger: {self.hunger}%, Happiness: {self.happiness}%")
 
     def play_with_pet(self):
@@ -628,6 +684,7 @@ class PetWindow(QWidget):
         self.hunger = min(100, self.hunger + 5)
         self.trigger_reaction()
         self.reaction_frames = 50
+        self.memory.record_interaction("play")
         print(f"Played with pet! Happiness: {self.happiness}%, Hunger: {self.hunger}%")
 
     def make_pet_sleep(self):
@@ -641,6 +698,10 @@ class PetWindow(QWidget):
         self.target_scale = 1.0
         self.idle_counter = 0
         print("Pet woke up!")
+
+    def closeEvent(self, event):
+        self.memory.save()
+        event.accept()
 
 
 if __name__ == "__main__":
