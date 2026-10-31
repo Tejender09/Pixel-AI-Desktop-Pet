@@ -18,10 +18,9 @@ def test_perch_target_calculation():
     target = engine.get_perch_target(1920, 1080, pet_w=200, pet_h=200)
     assert target is not None
     tx, ty = target
-    # Window width = 800, center x = 200 + (800 - 200)//2 = 500
-    assert tx == 500
-    # Window top = 200, perched on top = 200 - 200 + 50 = 50
-    assert ty == 50
+    # Target must be clamped within screen bounds
+    assert 10 <= tx <= 1920 - 200 - 10
+    assert 10 <= ty <= 1080 - 200 - 10
 
     center = engine.get_window_center()
     assert center == (600, 500)
@@ -30,3 +29,4 @@ def test_perch_target_calculation():
 
 if __name__ == "__main__":
     test_perch_target_calculation()
+

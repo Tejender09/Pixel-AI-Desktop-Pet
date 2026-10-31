@@ -39,3 +39,4 @@ def test_memory_store_lifecycle():
 
 if __name__ == "__main__":
     test_memory_store_lifecycle()
+

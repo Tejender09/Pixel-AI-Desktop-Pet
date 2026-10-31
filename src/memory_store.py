@@ -96,3 +96,4 @@ class MemoryStore:
             "pycharm64.exe": "PyCharm"
         }
         return friendly_names.get(fav, fav.replace(".exe", "").title())
+

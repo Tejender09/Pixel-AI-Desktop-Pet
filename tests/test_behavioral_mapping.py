@@ -30,3 +30,4 @@ def test_semantic_keywords_mapping():
 
 if __name__ == "__main__":
     test_semantic_keywords_mapping()
+

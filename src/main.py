@@ -2,9 +2,10 @@ import sys
 import random
 import math
 import os
+import json
 from PyQt6.QtWidgets import QApplication, QWidget, QMenu
-from PyQt6.QtCore import Qt, QPoint, QTimer, QRect
-from PyQt6.QtGui import QPainter, QColor, QPixmap, QTransform, QCursor
+from PyQt6.QtCore import Qt, QPoint, QPointF, QTimer, QRect, QRectF
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QPixmap, QTransform, QCursor, QFont, QFontMetrics
 
 # Import ContextEngine with fallback
 try:
@@ -36,14 +37,189 @@ class PetState:
     GROOVING = "GROOVING"  # Option A: Dancing along with music/Spotify
 
 
+class SpeechBubbleWidget(QWidget):
+    """
+    A dedicated, frameless, translucent speech bubble overlay that floats
+    above the pet in global screen coordinates. Eliminates window-border clipping,
+    features a seamless triangular pointer tail, soft multi-layer drop shadow,
+    crisp antialiased typography, pop-in spring easing, and smooth fade-out.
+    """
+    def __init__(self, pet_window):
+        super().__init__()
+        self.pet = pet_window
+
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+        self.text = ""
+        self.opacity = 0.0
+        self.scale = 0.8
+        self.visible_ticks = 0
+        self.total_ticks = 0
+        self.anim_tick = 0
+        self.bubble_w = 120
+        self.bubble_h = 38
+        self.hide()
+
+    def show_speech(self, text: str, duration_ticks: int = 150):
+        if not text:
+            self.hide()
+            return
+
+        self.text = text
+        self.total_ticks = max(60, duration_ticks)
+        self.visible_ticks = self.total_ticks
+        self.anim_tick = 0
+        self.opacity = 0.0
+
+        # Calculate dimensions from font metrics
+        font_size = self.pet.config.get("visuals", {}).get("bubble_font_size", 11)
+        font = QFont("Segoe UI", font_size, QFont.Weight.DemiBold)
+        metrics = QFontMetrics(font)
+        text_w = metrics.horizontalAdvance(text)
+        text_h = metrics.height()
+
+        pad_x = 16
+        pad_y = 10
+        self.bubble_w = max(90, text_w + pad_x * 2)
+        self.bubble_h = max(36, text_h + pad_y * 2)
+
+        # Canvas includes padding for drop shadow and tail
+        canvas_w = int(self.bubble_w + 24)
+        canvas_h = int(self.bubble_h + 24)
+        self.resize(canvas_w, canvas_h)
+
+        self.update_position()
+        self.show()
+        self.update()
+
+    def update_position(self):
+        if not self.isVisible():
+            return
+        screen = QApplication.primaryScreen().availableGeometry()
+
+        # Horizontally centered over pet
+        bx = self.pet.x() + (self.pet.width() - self.width()) // 2
+        # Positioned right above the grounded pet
+        by = self.pet.y() - self.height() + 25
+
+        # Screen edge safety clamping: if too close to top of monitor, shift downwards
+        if by < screen.y() + 8:
+            by = self.pet.y() + self.pet.height() - 15
+
+        clamped_x = max(screen.x() + 10, min(screen.x() + screen.width() - self.width() - 10, bx))
+        clamped_y = max(screen.y() + 8, min(screen.y() + screen.height() - self.height() - 10, by))
+        self.move(clamped_x, clamped_y)
+
+    def tick(self):
+        if self.visible_ticks <= 0:
+            if self.isVisible():
+                self.hide()
+            return
+
+        self.anim_tick += 1
+        self.visible_ticks -= 1
+
+        # Pop-in spring easing over first 10 frames
+        if self.anim_tick <= 6:
+            self.scale = 0.70 + (self.anim_tick / 6.0) * 0.35
+            self.opacity = min(1.0, self.anim_tick / 4.0)
+        elif self.anim_tick <= 10:
+            self.scale = 1.05 - ((self.anim_tick - 6) / 4.0) * 0.05
+            self.opacity = 1.0
+        else:
+            self.scale = 1.0
+            # Fade-out over the final 16 frames
+            if self.visible_ticks < 16:
+                self.opacity = max(0.0, self.visible_ticks / 16.0)
+            else:
+                self.opacity = 1.0
+
+        self.update_position()
+        self.update()
+
+    def paintEvent(self, event):
+        if not self.text or self.opacity <= 0.01:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setOpacity(self.opacity)
+
+        # Subtle floating hover wave
+        float_y = math.sin(self.anim_tick * 0.1) * 1.5
+
+        # Transform for elastic pop-in scale from bottom-center
+        cx = self.width() / 2.0
+        by_anchor = self.height() - 8.0
+        painter.translate(cx, by_anchor)
+        painter.scale(self.scale, self.scale)
+        painter.translate(-cx, -by_anchor)
+
+        # Bubble coordinates
+        bx = 12.0
+        by = 6.0 + float_y
+        bw = self.width() - 24.0
+        bh = float(self.bubble_h)
+
+        # Rounded rectangle body
+        r = 13.0
+        bubble_path = QPainterPath()
+        bubble_path.addRoundedRect(QRectF(bx, by, bw, bh), r, r)
+
+        # Triangular pointer tail seamlessly pointing toward pet's head
+        tail_w = 14.0
+        tail_h = 9.0
+        tail_cx = bx + bw * 0.38 if not self.pet.facing_right else bx + bw * 0.62
+        tail_path = QPainterPath()
+        tail_path.moveTo(tail_cx - tail_w / 2.0, by + bh)
+        tail_path.lineTo(tail_cx, by + bh + tail_h)
+        tail_path.lineTo(tail_cx + tail_w / 2.0, by + bh)
+        tail_path.closeSubpath()
+
+        # Seamless unified path without interior lines
+        full_balloon = bubble_path.united(tail_path)
+
+        # 1. Soft Multi-layer Drop Shadow
+        for off_y, alpha in [(3, 16), (2, 26), (1, 38)]:
+            painter.save()
+            painter.translate(0, off_y)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, alpha))
+            painter.drawPath(full_balloon)
+            painter.restore()
+
+        # 2. Bubble Body & Border
+        bg_hex = self.pet.config.get("visuals", {}).get("bubble_color", "#FFFFFF")
+        bg_color = QColor(bg_hex)
+        bg_color.setAlpha(252)
+
+        border_hex = self.pet.config.get("visuals", {}).get("bubble_border_color", "#DCE0E8")
+        painter.setBrush(bg_color)
+        painter.setPen(QColor(border_hex))
+        painter.drawPath(full_balloon)
+
+        # 3. Clean Antialiased Typography
+        font_size = self.pet.config.get("visuals", {}).get("bubble_font_size", 11)
+        font = QFont("Segoe UI", font_size, QFont.Weight.DemiBold)
+        painter.setFont(font)
+
+        text_hex = self.pet.config.get("visuals", {}).get("bubble_text_color", "#1E222D")
+        painter.setPen(QColor(text_hex))
+        painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, self.text)
+
+
 class AnimationManager:
     """
     Loads and manages animated sprites for all pet states.
     Supports single spritesheets (e.g. 128x32 horizontal strip)
     as well as individual 32x32 frame sequences (e.g. 01.png, 02.png).
-    
-    Eye tracking is baked directly into the 32x32 sprite frames so the eye
-    pixels are 100% locked to the head, body, bobbing, and pixel grid.
     """
     def __init__(self, base_path: str):
         self.base_path = base_path
@@ -58,14 +234,12 @@ class AnimationManager:
             PetState.WATCHING: [],
             PetState.GROOVING: []
         }
-        # Cache for tracked frames: (state, frame_idx, shift_x, shift_y) -> QPixmap
         self.tracked_cache = {}
         self.load_assets()
 
     def load_assets(self):
         sprites_dir = os.path.join(self.base_path, "sprites")
         
-        # Verify or auto-generate assets if directory is missing or empty
         if not os.path.exists(sprites_dir) or not os.listdir(sprites_dir):
             print("Sprites not found, auto-generating pixel art...")
             generate_all_sprites(sprites_dir)
@@ -86,7 +260,6 @@ class AnimationManager:
             folder_path = os.path.join(sprites_dir, folder_name)
             frames = []
 
-            # 1. Try loading from spritesheet
             sheet_candidates = [
                 os.path.join(sprites_dir, f"{folder_name}_sheet.png"),
                 os.path.join(sprites_dir, f"{folder_name}.png"),
@@ -111,7 +284,6 @@ class AnimationManager:
                             sheet_loaded = True
                             break
 
-            # 2. If no multi-frame spritesheet loaded, load individual frame files
             if not sheet_loaded and os.path.isdir(folder_path):
                 frame_files = sorted([
                     f for f in os.listdir(folder_path)
@@ -135,7 +307,6 @@ class AnimationManager:
     def _create_tracked_frame(self, base_pixmap: QPixmap, shift_x: int, shift_y: int) -> QPixmap:
         img = base_pixmap.toImage()
 
-        # Find eye socket pixels in upper portion of sprite (y < 22)
         eye_pixels = []
         for y in range(0, min(22, img.height())):
             for x in range(img.width()):
@@ -147,7 +318,6 @@ class AnimationManager:
         if not eye_pixels:
             return base_pixmap
 
-        # Cluster into left and right eyes (threshold at x = 16)
         left_eye = [p for p in eye_pixels if p[0] < 16]
         right_eye = [p for p in eye_pixels if p[0] >= 16]
         eyes = [e for e in [left_eye, right_eye] if e]
@@ -199,7 +369,6 @@ class AnimationManager:
         speed = speed_map.get(state, 8)
         idx = (frame_count // speed) % len(frames)
 
-        # In SLEEPING, SATED, and GROOVING states, eyes are styled lines (^.^, - -, ♪)
         if state in [PetState.SLEEPING, PetState.SATED, PetState.GROOVING]:
             return frames[idx]
 
@@ -273,6 +442,13 @@ class PetWindow(QWidget):
         self.memory = MemoryStore()
         self.current_context_mood = "NEUTRAL"
 
+        # Configuration & Speech
+        self.load_config()
+        self.speech_text = ""
+        self.speech_timer = 0
+        self.speech_duration = 0
+        self.bubble_widget = SpeechBubbleWidget(self)
+
         # Heartbeat QTimer (30ms ~ 33 FPS)
         self.heartbeat = QTimer(self)
         self.heartbeat.timeout.connect(self.update_logic)
@@ -294,6 +470,44 @@ class PetWindow(QWidget):
         x = (self.width() - sw) // 2
         y = (self.height() - sh) // 2
         return QRect(x, y, sw, sh)
+
+    # -------------------------------------------------------------
+    # Configuration & Dialogue
+    # -------------------------------------------------------------
+    def load_config(self):
+        """Loads pet personality and settings from config.json."""
+        try:
+            config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "config.json"))
+            with open(config_path, "r", encoding="utf-8") as f:
+                self.config = json.load(f)
+        except Exception as e:
+            print(f"Config Error: {e}")
+            self.config = {}
+
+    def say(self, text: str, duration: int = 150):
+        """Displays text in the speech bubble above the pet."""
+        self.speech_text = text
+        self.speech_duration = duration
+        self.speech_timer = duration
+        self.bubble_widget.show_speech(text, duration)
+
+    def trigger_speech(self, mood: str):
+        """Picks a random line from config for current mood and shows it."""
+        mood_data = self.config.get("mood_mapping", {}).get(mood, {})
+        dialogues = mood_data.get("dialogue", [])
+
+        if isinstance(dialogues, str):
+            dialogues = [dialogues]
+
+        if dialogues:
+            chosen = random.choice(dialogues)
+            duration = random.randint(130, 220)
+            self.say(chosen, duration)
+            pet_name = self.config.get('pet_settings', {}).get('name', 'Pixel')
+            try:
+                print(f"[Speech] {pet_name} says: {chosen}")
+            except Exception:
+                pass
 
     # -------------------------------------------------------------
     # Main Heartbeat Update Loop
@@ -328,7 +542,7 @@ class PetWindow(QWidget):
             if self.reaction_frames <= 0 and not self.is_dragging:
                 self.state = PetState.IDLE
 
-        # 4. Memory Tracking & Active App Recording (every 1 second ~ 33 frames)
+        # 4. Memory Tracking & Active App Recording (every ~1s)
         if self.frame_count % 33 == 0:
             info = self.brain.get_active_window_info()
             proc = info.get("process", "")
@@ -344,7 +558,11 @@ class PetWindow(QWidget):
             context_mood = self.brain.analyze_context()
             if context_mood:
                 self.current_context_mood = context_mood
-                print(f"🧠 Pet noticed context change: {context_mood}")
+                print(f"[Brain] Pet noticed context change: {context_mood}")
+
+                # 35% chance to comment on the new context
+                if random.random() < 0.35:
+                    self.trigger_speech(context_mood)
 
                 # Behavioral Mapping (Option A)
                 if context_mood == "WATCHING":
@@ -375,7 +593,7 @@ class PetWindow(QWidget):
         face_center_x = hitbox.x() + hitbox.width() // 2
         face_center_y = hitbox.y() + int(hitbox.height() * 0.4)
 
-        # If mouse is idle for > 2 seconds, pet gazes toward the center of the active window
+        # If mouse is idle for > 2 seconds, pet gazes toward active window center
         gaze_point = cursor_local
         if self.mouse_idle_ticks > 60:
             win_center = self.brain.get_window_center()
@@ -397,6 +615,13 @@ class PetWindow(QWidget):
 
         # 8. Procedural Animation "Juice"
         self.update_animation_juice()
+
+        # 8.5 Speech Bubble Tick
+        self.bubble_widget.tick()
+        if self.speech_timer > 0:
+            self.speech_timer -= 1
+            if self.speech_timer <= 0:
+                self.speech_text = ""
 
         # 9. Spatial AI & Wandering
         if not self.is_dragging:
@@ -447,21 +672,18 @@ class PetWindow(QWidget):
             self.squash_stretch_y = 1.0 - math.sin(t * 0.04) * 0.02
 
         elif self.state == PetState.WORRIED:
-            # Anxious jitter and tense shivering
             self.target_scale = 0.95
             self.bounce_y = math.sin(t * 0.8) * 1.5
             self.squash_stretch_x = 1.0 + math.sin(t * 0.8) * 0.02
             self.squash_stretch_y = 1.0 - math.sin(t * 0.8) * 0.02
 
         elif self.state == PetState.WATCHING:
-            # Relaxed sitting cinema companion
             self.target_scale = 1.02
             self.bounce_y = math.sin(t * 0.05) * 2.0
             self.squash_stretch_x = 1.0
             self.squash_stretch_y = 1.0
 
         elif self.state == PetState.GROOVING:
-            # Energetic dance bobbing
             self.target_scale = 1.05
             self.bounce_y = abs(math.sin(t * 0.35)) * 10.0
             self.squash_stretch_x = 1.0 + math.sin(t * 0.35) * 0.04
@@ -475,7 +697,6 @@ class PetWindow(QWidget):
     def start_wandering(self):
         screen = QApplication.primaryScreen().availableGeometry()
         
-        # 70% chance to perch near the active user window if one is open
         perch_target = None
         if random.random() < 0.70:
             perch_target = self.brain.get_perch_target(
@@ -485,7 +706,6 @@ class PetWindow(QWidget):
         if perch_target:
             self.target_pos = QPoint(perch_target[0], perch_target[1])
         else:
-            # Fall back to free wandering within screen bounds
             margin = 150
             min_x = max(20, screen.x() + margin)
             max_x = min(screen.width() - margin - 200, screen.x() + screen.width() - margin)
@@ -514,12 +734,12 @@ class PetWindow(QWidget):
         dist = math.hypot(dx, dy)
 
         if dist < self.walk_speed * 2.0:
-            # Return to context mood or IDLE upon arrival
             if self.current_context_mood in [PetState.WATCHING, PetState.WORRIED, PetState.GROOVING]:
                 self.state = self.current_context_mood
             else:
                 self.state = PetState.IDLE
             self.move(tar_x, tar_y)
+            self.bubble_widget.update_position()
             return
 
         if dx > 1:
@@ -530,6 +750,7 @@ class PetWindow(QWidget):
         step_x = int((dx / dist) * self.walk_speed)
         step_y = int((dy / dist) * self.walk_speed)
         self.move(curr_x + step_x, curr_y + step_y)
+        self.bubble_widget.update_position()
 
     def trigger_reaction(self):
         self.state = PetState.REACTING
@@ -576,6 +797,70 @@ class PetWindow(QWidget):
         painter.drawRoundedRect(x + int(w*0.2), y + int(h*0.3), int(w*0.6), int(h*0.5), 10, 10)
         painter.drawRoundedRect(x + int(w*0.25), y + int(h*0.15), int(w*0.5), int(h*0.35), 8, 8)
 
+    def draw_speech_bubble(self, painter: QPainter, hitbox: QRect):
+        """
+        In-canvas speech bubble drawing fallback with unified path,
+        soft shadow, antialiased typography, and seamless tail.
+        """
+        if not self.speech_text:
+            return
+
+        text = self.speech_text
+        font_size = self.config.get("visuals", {}).get("bubble_font_size", 11)
+        font = QFont("Segoe UI", font_size, QFont.Weight.DemiBold)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setFont(font)
+
+        metrics = painter.fontMetrics()
+        text_w = metrics.horizontalAdvance(text)
+        text_h = metrics.height()
+
+        padding = 12
+        bw = min(self.width() - 16, text_w + padding * 2)
+        bh = text_h + padding * 2
+
+        bx = (self.width() - bw) // 2
+        by = max(4, hitbox.y() - bh - 8)
+
+        # Bubble shape
+        bubble_path = QPainterPath()
+        bubble_path.addRoundedRect(QRectF(bx, by, bw, bh), 12, 12)
+
+        # Tail
+        tail_w = 12.0
+        tail_h = 8.0
+        tail_x = bx + (bw * 0.4 if not self.facing_right else bw * 0.6)
+        tail_path = QPainterPath()
+        tail_path.moveTo(tail_x - tail_w / 2.0, by + bh)
+        tail_path.lineTo(tail_x, by + bh + tail_h)
+        tail_path.lineTo(tail_x + tail_w / 2.0, by + bh)
+        tail_path.closeSubpath()
+
+        full_balloon = bubble_path.united(tail_path)
+
+        # Shadow
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 30))
+        painter.save()
+        painter.translate(0, 2)
+        painter.drawPath(full_balloon)
+        painter.restore()
+
+        # Balloon
+        bg_color = QColor(self.config.get("visuals", {}).get("bubble_color", "#FFFFFF"))
+        painter.setBrush(bg_color)
+        painter.setPen(QColor(self.config.get("visuals", {}).get("bubble_border_color", "#DCE0E8")))
+        painter.drawPath(full_balloon)
+
+        # Text
+        text_color = QColor(self.config.get("visuals", {}).get("bubble_text_color", "#1E222D"))
+        painter.setPen(text_color)
+        painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
+
     # -------------------------------------------------------------
     # Mouse Interaction: Dragging, Hover, and Context Menu
     # -------------------------------------------------------------
@@ -594,6 +879,7 @@ class PetWindow(QWidget):
             new_pos = event.globalPosition().toPoint() - self.drag_offset
             self.move(new_pos)
             self.target_pos = new_pos
+            self.bubble_widget.update_position()
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -603,9 +889,15 @@ class PetWindow(QWidget):
             self.is_dragging = False
             self.reaction_frames = 20
             self.idle_counter = 0
+            self.bubble_widget.update_position()
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if hasattr(self, 'bubble_widget'):
+            self.bubble_widget.update_position()
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
@@ -677,6 +969,7 @@ class PetWindow(QWidget):
         self.pop_animation_frames = 50
         self.target_scale = 1.35
         self.memory.record_interaction("feed")
+        self.trigger_speech("FEED")
         print(f"Fed pet! Hunger: {self.hunger}%, Happiness: {self.happiness}%")
 
     def play_with_pet(self):
@@ -685,21 +978,26 @@ class PetWindow(QWidget):
         self.trigger_reaction()
         self.reaction_frames = 50
         self.memory.record_interaction("play")
+        self.trigger_speech("PLAY")
         print(f"Played with pet! Happiness: {self.happiness}%, Hunger: {self.hunger}%")
 
     def make_pet_sleep(self):
         self.state = PetState.SLEEPING
         self.sleep_timer = 400
         self.target_scale = 0.85
+        self.trigger_speech("NAP")
         print("Pet is taking a nap... zzz")
 
     def wake_up(self):
         self.state = PetState.IDLE
         self.target_scale = 1.0
         self.idle_counter = 0
+        self.trigger_speech("WAKE")
         print("Pet woke up!")
 
     def closeEvent(self, event):
+        if hasattr(self, 'bubble_widget'):
+            self.bubble_widget.close()
         self.memory.save()
         event.accept()
 

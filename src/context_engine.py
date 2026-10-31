@@ -144,28 +144,31 @@ class ContextEngine:
         pet_h: int = 200
     ) -> Optional[Tuple[int, int]]:
         """
-        Calculates spatial perch coordinates on or near the active window.
-        Returns (x, y) target position on the screen, or None if no valid window.
+        Calculates a random perch coordinate along the edges of the active window.
+        Returns (x, y) target position on the screen.
         """
+        import random
         info = self.get_active_window_info()
         rect = info.get("rect", (0, 0, 0, 0))
         left, top, right, bottom = rect
         win_w = right - left
         win_h = bottom - top
 
-        # Ignore tiny or fullscreen-covering windows (like Windows desktop itself)
         if win_w < 150 or win_h < 150 or (win_w >= screen_w and win_h >= screen_h):
             return None
 
-        # Perch on the window titlebar / header:
-        # Paws resting on top edge of window
-        target_x = left + (win_w - pet_w) // 2
-        target_y = top - pet_h + 50
+        # Randomly choose which edge to perch on: 0=Top, 1=Left, 2=Right
+        edge = random.randint(0, 2)
 
-        # If too high off screen, sit in the top-right corner of the window instead
-        if target_y < 10:
-            target_y = top + 20
-            target_x = min(right - pet_w + 20, screen_w - pet_w)
+        if edge == 0: # Top Edge: Random X along the top, Y just above the window
+            target_x = random.randint(left, max(left, right - pet_w))
+            target_y = top - pet_h + 20
+        elif edge == 1: # Left Edge: X just to the left, Random Y along the side
+            target_x = left - pet_w + 20
+            target_y = random.randint(top, max(top, bottom - pet_h))
+        else: # Right Edge: X just to the right, Random Y along the side
+            target_x = right - 20
+            target_y = random.randint(top, max(top, bottom - pet_h))
 
         # Clamp strictly within screen bounds
         clamped_x = max(10, min(screen_w - pet_w - 10, target_x))

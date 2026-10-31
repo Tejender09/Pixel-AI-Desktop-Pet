@@ -1,5 +1,115 @@
 {
-  "idle": { "fps": 2, "loop": true, "files": ["idle_01.png", "idle_02.png"] },
-  "walk": { "fps": 8, "loop": true, "files": ["walk_01.png", "walk_02.png", "walk_03.png"] },
-  "react": { "fps": 4, "loop": false, "files": ["surprise.png"] }
+  "pet_settings": {
+    "name": "Pixel",
+    "default_scale": 1.0,
+    "walk_speed": 2.0,
+    "idle_target_time": 200,
+    "bond_growth_rate": 1.2
+  },
+  "mood_mapping": {
+    "FOCUSED": {
+      "state": "IDLE",
+      "dialogue": [
+        "Coding time! 💻",
+        "Keep it up!",
+        "Looking sharp!",
+        "Don't forget to blink! 👀",
+        "Writing clean code today? ✨"
+      ]
+    },
+    "GROOVING": {
+      "state": "GROOVING",
+      "dialogue": [
+        "This beat is fire! 🔥",
+        "I love this song! 🎶",
+        "Vibe check: Passed ✅",
+        "Jamming with you! 🎧",
+        "Music makes coding better! 🎵"
+      ]
+    },
+    "WATCHING": {
+      "state": "WATCHING",
+      "dialogue": [
+        "Is this a movie? 🍿",
+        "Ooo, a video! 🎬",
+        "I'm watching too!",
+        "Quiet! Good part starting! 🤫"
+      ]
+    },
+    "CURIOUS": {
+      "state": "REACTING",
+      "dialogue": [
+        "What's this? 🔍",
+        "Ooooh! ✨",
+        "Interesting...",
+        "Look at that! 🐾"
+      ]
+    },
+    "SOCIAL": {
+      "state": "REACTING",
+      "dialogue": [
+        "Hi there! 👋",
+        "Anyone home?",
+        "Chatting away! 💬"
+      ]
+    },
+    "NEUTRAL": {
+      "state": "IDLE",
+      "dialogue": [
+        "Just hanging out. 🐾",
+        "Stretch... 🐈",
+        "Purrr... ❤️",
+        "Exploring your desktop! 🖥️"
+      ]
+    },
+    "WORRIED": {
+      "state": "WORRIED",
+      "dialogue": [
+        "Oh no, a bug! 🐛",
+        "Is it a syntax error? 😱",
+        "Don't worry, you'll fix it! 💪",
+        "Take a breath, we got this!"
+      ]
+    },
+    "FEED": {
+      "state": "SATED",
+      "dialogue": [
+        "Yum! Delicious! 🍎",
+        "Thank you! ❤️",
+        "My favorite snack! 😋",
+        "Purrr, so tasty! 🐟"
+      ]
+    },
+    "PLAY": {
+      "state": "REACTING",
+      "dialogue": [
+        "Yay! Yarn ball! 🧶",
+        "Wheee! 🎉",
+        "So much fun! ✨",
+        "Best human ever! 💖"
+      ]
+    },
+    "NAP": {
+      "state": "SLEEPING",
+      "dialogue": [
+        "Napping time... 💤",
+        "Zzz... so cozy...",
+        "Catching cat naps... 😴"
+      ]
+    },
+    "WAKE": {
+      "state": "IDLE",
+      "dialogue": [
+        "Good morning! ☀️",
+        "Big stretch! 🐾",
+        "Ready to hang out! ✨"
+      ]
+    }
+  },
+  "visuals": {
+    "bubble_color": "#FFFFFF",
+    "bubble_text_color": "#1E222D",
+    "bubble_border_color": "#DCE0E8",
+    "bubble_font_size": 11
+  }
 }
