@@ -28,9 +28,9 @@ except ImportError:
 
 # Import Gemini AI
 try:
-    from brain_ai import GeminiBrain
+    from brain_ai import GeminiBrain, load_gemini_api_key
 except ImportError:
-    from src.brain_ai import GeminiBrain
+    from src.brain_ai import GeminiBrain, load_gemini_api_key
 
 class AICommunication(QObject):
     """Helper class to bridge AI background threads and PyQt main thread."""
@@ -544,11 +544,11 @@ class PetWindow(QWidget):
         # Configuration MUST be loaded before anything that reads self.config
         self.load_config()
 
-        # AI Brain Integration
+        # AI Brain Integration (auto-loads from user_data/secrets.json, .env, or config)
         self.ai_comm = AICommunication()
         self.ai_comm.response_received.connect(self.say)
 
-        api_key = self.config.get("api_keys", {}).get("gemini", "")
+        api_key = load_gemini_api_key(self.config)
         if api_key:
             self.ai_brain = GeminiBrain(api_key=api_key)
             print("[System] AI Brain initialized with Gemini.")
@@ -759,6 +759,17 @@ class PetWindow(QWidget):
                     self.walk_speed = 2.0
                     if self.state in [PetState.WATCHING, PetState.WORRIED, PetState.GROOVING]:
                         self.state = PetState.IDLE
+
+        # Real-time audio listener: dynamically start/stop dancing with music playback
+        if self.frame_count % 30 == 0 and not self.is_dragging and self.state != PetState.SLEEPING:
+            if self.state == PetState.GROOVING:
+                if not self.brain.is_audio_playing():
+                    self.state = PetState.WATCHING if self.current_context_mood == "WATCHING" else PetState.IDLE
+                    print("[Audio] Music paused/silent. Pet stopped grooving.")
+            elif self.current_context_mood in ["GROOVING", "WATCHING"] and self.state in [PetState.IDLE, PetState.WATCHING]:
+                if self.brain.is_audio_playing():
+                    self.state = PetState.GROOVING
+                    print("[Audio] Music heard! Pet started grooving.")
 
         # 6. Mouse Tracking & Window Gaze Sight (Option B)
         cursor_global = QCursor.pos()

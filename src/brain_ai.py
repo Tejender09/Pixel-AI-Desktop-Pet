@@ -1,3 +1,5 @@
+import os
+import json
 import threading
 from typing import Callable, Optional
 
@@ -13,6 +15,58 @@ if not _USE_NEW_SDK:
         import google.generativeai as _genai_old
     except ImportError:
         _genai_old = None
+
+
+def load_gemini_api_key(config_dict: Optional[dict] = None) -> str:
+    """
+    Safely resolves the Gemini API key from multiple gitignored sources in priority order:
+    1. user_data/secrets.json (recommended, gitignored)
+    2. .env file in root directory (gitignored)
+    3. os.environ["GEMINI_API_KEY"]
+    4. config.json under api_keys.gemini
+    """
+    search_dirs = [os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), os.path.abspath(".")]
+
+    # 1. user_data/secrets.json
+    for base in search_dirs:
+        secrets_path = os.path.join(base, "user_data", "secrets.json")
+        if os.path.exists(secrets_path):
+            try:
+                with open(secrets_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    key = data.get("gemini_api_key") or data.get("gemini")
+                    if key and key.strip():
+                        return key.strip()
+            except Exception:
+                pass
+
+    # 2. .env file
+    for base in search_dirs:
+        env_path = os.path.join(base, ".env")
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("GEMINI_API_KEY="):
+                            key = line.split("=", 1)[1].strip(" \"'")
+                            if key:
+                                return key
+            except Exception:
+                pass
+
+    # 3. Environment Variable
+    env_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if env_key:
+        return env_key
+
+    # 4. Fallback to passed config_dict
+    if config_dict:
+        cfg_key = config_dict.get("api_keys", {}).get("gemini", "").strip()
+        if cfg_key:
+            return cfg_key
+
+    return ""
 
 
 class GeminiBrain:
@@ -64,11 +118,16 @@ class GeminiBrain:
         def _think():
             self.is_thinking = True
             try:
+                print(f"[AI] Gemini observing screen: '{subject}' (Mood: {mood})...")
                 prompt = (
-                    f"You are {self.personality}. Your human is currently in a {mood} mood "
-                    f"and is looking at: '{subject}'. "
-                    f"Give a very short, cute, and personality-driven 1-sentence reaction. "
-                    f"Do not use emojis. Keep it under 15 words. Be a bit sassy but sweet."
+                    f"You are Pixel, a witty, observant, and charming pixel-art desktop pet cat perched on the user's screen.\n"
+                    f"The user has active window/content: '{subject}'. Current vibe: '{mood}'.\n"
+                    f"Give ONE unique, clever, and spontaneous sentence commenting on what they are specifically doing or looking at.\n"
+                    f"Rules:\n"
+                    f"- DO NOT use emojis (the speech bubble uses a retro pixel font that cannot render emojis).\n"
+                    f"- Keep it strictly under 14 words.\n"
+                    f"- Never say 'You have been on' or 'Tell me more about it' or generic filler.\n"
+                    f"- Be fun, a little sassy, or playfully curious like a real pet watching over their shoulder."
                 )
 
                 if _USE_NEW_SDK:
@@ -81,6 +140,7 @@ class GeminiBrain:
                     response = self._legacy_model.generate_content(prompt)
                     text = response.text.strip().replace('"', '')
 
+                print(f"[AI] Gemini spoke: \"{text}\"")
                 callback(text)
             except Exception as e:
                 print(f"[AI Error] {e}")

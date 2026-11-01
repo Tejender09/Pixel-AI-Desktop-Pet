@@ -230,10 +230,34 @@ class ContextEngine:
         subject = subject.strip(" - |")
         return subject
 
+    def is_audio_playing(self) -> bool:
+        """
+        Detects if Windows is actively outputting sound to speakers or headphones.
+        Inspects active audio sessions and peak volume via Windows Core Audio.
+        Returns True if sound is actively playing, False if muted/paused/silent.
+        """
+        try:
+            from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+            sessions = AudioUtilities.GetAllSessions()
+            for s in sessions:
+                # State 1 = Active audio session
+                if getattr(s, 'State', 0) == 1:
+                    try:
+                        meter = s._ctl.QueryInterface(IAudioMeterInformation)
+                        if meter.GetPeakValue() > 0.0005:
+                            return True
+                    except Exception:
+                        return True
+            return False
+        except Exception:
+            return False
+
     def analyze_context(self) -> Optional[str]:
         """
         Analyzes the active window and returns a semantic 'mood'
         if a match is found in the app_moods dictionary.
+        Incorporates real-time audio detection so the pet only grooves
+        when audio is actively playing through speakers.
         """
         info = self.get_active_window_info()
         title = info.get("title", "").lower()
@@ -251,10 +275,22 @@ class ContextEngine:
         for keyword, mood in self.app_moods.items():
             # If it's a keyword (not a .exe), check if it's in the window title
             if not keyword.endswith(".exe") and keyword in title:
+                if mood == "GROOVING":
+                    # Only groove if audio is literally playing through speakers!
+                    if self.is_audio_playing():
+                        return "GROOVING"
+                    else:
+                        return "WATCHING" if ("youtube" in title or "video" in title) else "IDLE"
                 return mood
 
         # 2. FALLBACK: Check process name.
         if process in self.app_moods:
-            return self.app_moods[process]
+            mood = self.app_moods[process]
+            if mood == "GROOVING":
+                if self.is_audio_playing():
+                    return "GROOVING"
+                else:
+                    return "IDLE"
+            return mood
 
         return "NEUTRAL"

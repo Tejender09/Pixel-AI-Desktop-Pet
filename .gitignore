@@ -43,5 +43,9 @@ htmlcov/
 
 # User data & persistent memory
 user_data/
+.env
+*.env
+secrets.json
+config/secrets.json
 
 
