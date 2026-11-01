@@ -43,13 +43,22 @@ class ContextEngine:
             "github": "FOCUSED",
             "stackoverflow": "FOCUSED",
             "vscode": "FOCUSED",
-            # Music / Grooving
+            # Music / Grooving (Strictly when audio is playing)
             "spotify.exe": "GROOVING",
-            "music": "GROOVING",
-            "soundcloud": "GROOVING",
-            "apple music": "GROOVING",
             "youtube music": "GROOVING",
-            # Video / Cinema Watching
+            "apple music": "GROOVING",
+            "soundcloud": "GROOVING",
+            "music": "GROOVING",
+            "song": "GROOVING",
+            "songs": "GROOVING",
+            "concert": "GROOVING",
+            "remix": "GROOVING",
+            "lofi": "GROOVING",
+            "beats": "GROOVING",
+            "soundtrack": "GROOVING",
+            "official audio": "GROOVING",
+            "music video": "GROOVING",
+            # Video / Cinema Watching (Normal videos, tutorials, movies, streams)
             "youtube": "WATCHING",
             "netflix": "WATCHING",
             "vlc.exe": "WATCHING",
@@ -58,6 +67,8 @@ class ContextEngine:
             "twitch": "WATCHING",
             "movie": "WATCHING",
             "cinema": "WATCHING",
+            "tutorial": "WATCHING",
+            "podcast": "WATCHING",
             # Errors / Worried
             "error": "WORRIED",
             "bug": "WORRIED",

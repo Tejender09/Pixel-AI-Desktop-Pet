@@ -766,7 +766,7 @@ class PetWindow(QWidget):
                 if not self.brain.is_audio_playing():
                     self.state = PetState.WATCHING if self.current_context_mood == "WATCHING" else PetState.IDLE
                     print("[Audio] Music paused/silent. Pet stopped grooving.")
-            elif self.current_context_mood in ["GROOVING", "WATCHING"] and self.state in [PetState.IDLE, PetState.WATCHING]:
+            elif self.current_context_mood == "GROOVING" and self.state in [PetState.IDLE, PetState.WATCHING]:
                 if self.brain.is_audio_playing():
                     self.state = PetState.GROOVING
                     print("[Audio] Music heard! Pet started grooving.")

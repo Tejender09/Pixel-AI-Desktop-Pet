@@ -32,6 +32,19 @@ def test_semantic_keywords_mapping():
     engine.get_active_window_info = lambda: mock_info("Paused Song - Spotify", "spotify.exe")
     assert engine.analyze_context() == "IDLE"
 
+    # When normal video (YouTube/tutorial/movie) is playing with sound -> WATCHING (watching attentively, not dancing!)
+    engine.is_audio_playing = lambda: True
+    engine.last_window_title = ""
+    engine.last_process = ""
+    engine.get_active_window_info = lambda: mock_info("Python Full Course - YouTube", "chrome.exe")
+    assert engine.analyze_context() == "WATCHING"
+
+    # When concert / music video is playing with sound -> GROOVING (dancing along!)
+    engine.last_window_title = ""
+    engine.last_process = ""
+    engine.get_active_window_info = lambda: mock_info("Live Concert 2026 - YouTube", "chrome.exe")
+    assert engine.analyze_context() == "GROOVING"
+
     engine.get_active_window_info = lambda: mock_info("main.py - Visual Studio Code", "code.exe")
     assert engine.analyze_context() == "FOCUSED"
 
