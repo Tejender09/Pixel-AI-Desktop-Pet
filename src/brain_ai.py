@@ -73,11 +73,11 @@ def load_gemini_api_key(config_dict: Optional[dict] = None) -> str:
 
 class GeminiBrain:
     """
-    Handles the LLM integration for the Desktop Pet using Google Gemini.
+    Handles the LLM integration for Pixel the Desktop Pet using Google Gemini.
     Uses a background thread to prevent the main UI from freezing.
     Supports both google-genai (current) and google.generativeai (legacy).
     """
-    def __init__(self, api_key: str, personality: str = "a tiny, sassy, and curious pixel-art pet"):
+    def __init__(self, api_key: str, personality: str = "Pixel, a witty, observant, and sassy pixel-art cat who lives on the user's desktop"):
         self.api_key = api_key
         self.personality = personality
         self.is_thinking = False

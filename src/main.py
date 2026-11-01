@@ -1235,6 +1235,8 @@ class PetWindow(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setApplicationName("Pixel")
+    app.setApplicationDisplayName("Pixel - Desktop Pet")
     pet = PetWindow()
     pet.show()
     sys.exit(app.exec())
