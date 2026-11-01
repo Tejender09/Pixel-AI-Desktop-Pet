@@ -111,6 +111,36 @@ class GeminiBrain:
                 "No Gemini SDK found. Install with: pip install google-genai"
             )
 
+    def _parse_retry_delay(self, err_str: str) -> int:
+        """
+        Parses the retry wait time in seconds from a Gemini 429 error string.
+        Handles both:
+          - Proto format:  retry_delay { seconds: 78742 }
+          - Human format:  retry in 21h52m22.36499616s
+        Adds a 60-second buffer. Falls back to 90s if unparseable.
+        """
+        # 1. Proto field (most reliable): retry_delay { seconds: XXXX }
+        m = re.search(r'retry_delay\s*\{[^}]*seconds:\s*(\d+)', err_str, re.DOTALL | re.IGNORECASE)
+        if m:
+            return int(m.group(1)) + 60
+
+        # 2. Human-readable:  "retry in Xh Ym Zs"
+        total = 0
+        h = re.search(r'(\d+)h', err_str)
+        mn = re.search(r'(\d+)m', err_str)
+        s = re.search(r'(\d+(?:\.\d+)?)s', err_str)
+        if h:
+            total += int(h.group(1)) * 3600
+        if mn:
+            total += int(mn.group(1)) * 60
+        if s:
+            total += int(float(s.group(1)))
+        if total > 0:
+            return total + 60
+
+        # 3. Fallback
+        return 90
+
     def generate_reaction(self, subject: str, mood: str, callback: Callable[[str], None], fallback_callback: Optional[Callable[[], None]] = None):
         """
         Generates a reaction in a background thread to avoid UI freezing.
@@ -126,7 +156,11 @@ class GeminiBrain:
         now = time.time()
         if now < self._rate_limited_until:
             remaining = int(self._rate_limited_until - now)
-            print(f"[AI] Skipping (rate limited, {remaining}s cooldown left)")
+            hrs = remaining // 3600
+            mins = (remaining % 3600) // 60
+            secs = remaining % 60
+            label = f"{hrs}h {mins}m {secs}s" if hrs else f"{mins}m {secs}s"
+            print(f"[AI] Skipping (rate limited, {label} cooldown left)")
             if fallback_callback:
                 fallback_callback()
             return
@@ -172,11 +206,13 @@ class GeminiBrain:
                 err_str = str(e)
                 print(f"[AI Error] {err_str}")
                 if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
-                    # Parse retry_delay from the error message if present
-                    match = re.search(r'retry.*?(\d+).*?second', err_str, re.IGNORECASE)
-                    wait = int(match.group(1)) + 10 if match else 70
+                    wait = self._parse_retry_delay(err_str)
                     self._rate_limited_until = time.time() + wait
-                    print(f"[AI] Rate limited by API. Cooling down for {wait}s.")
+                    hrs = wait // 3600
+                    mins = (wait % 3600) // 60
+                    secs = wait % 60
+                    label = f"{hrs}h {mins}m {secs}s" if hrs else f"{mins}m {secs}s"
+                    print(f"[AI] Rate limited by API. Cooling down for {label}.")
                 if fallback_callback:
                     fallback_callback()
             finally:
