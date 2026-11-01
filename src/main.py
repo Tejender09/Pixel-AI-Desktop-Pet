@@ -3,8 +3,9 @@ import random
 import math
 import os
 import json
+import threading
 from PyQt6.QtWidgets import QApplication, QWidget, QMenu
-from PyQt6.QtCore import Qt, QPoint, QPointF, QTimer, QRect, QRectF
+from PyQt6.QtCore import Qt, QPoint, QPointF, QTimer, QRect, QRectF, pyqtSignal, QObject
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QPixmap, QTransform, QCursor, QFont, QFontMetrics, QPolygonF
 
 # Import ContextEngine with fallback
@@ -25,6 +26,15 @@ try:
 except ImportError:
     from src.generate_sprites import generate_all_sprites
 
+# Import Gemini AI
+try:
+    from brain_ai import GeminiBrain
+except ImportError:
+    from src.brain_ai import GeminiBrain
+
+class AICommunication(QObject):
+    """Helper class to bridge AI background threads and PyQt main thread."""
+    response_received = pyqtSignal(str)
 
 class PetState:
     IDLE = "IDLE"
@@ -395,13 +405,13 @@ class AnimationManager:
     def _create_tracked_frame(self, base_pixmap: QPixmap, shift_x: int, shift_y: int) -> QPixmap:
         img = base_pixmap.toImage()
 
-        eye_pixels = []
+        eye_pixels = set()
         for y in range(0, min(22, img.height())):
             for x in range(img.width()):
                 c = img.pixelColor(x, y)
                 if (c.red() > 240 and c.green() > 240 and c.blue() > 240) or \
                    (c.red() < 60 and c.green() < 60 and c.blue() < 60 and c.alpha() > 200):
-                    eye_pixels.append((x, y))
+                    eye_pixels.add((x, y))
 
         if not eye_pixels:
             return base_pixmap
@@ -414,6 +424,7 @@ class AnimationManager:
         pupil_color = QColor(30, 30, 40, 255)
 
         for e in eyes:
+            eye_set = set(e)
             min_x = min(p[0] for p in e)
             max_x = max(p[0] for p in e)
             min_y = min(p[1] for p in e)
@@ -421,7 +432,7 @@ class AnimationManager:
 
             for py in range(min_y, max_y + 1):
                 for px in range(min_x, max_x + 1):
-                    if (px, py) in e:
+                    if (px, py) in eye_set:
                         img.setPixelColor(px, py, white_color)
 
             cx = (min_x + max_x) // 2
@@ -530,8 +541,22 @@ class PetWindow(QWidget):
         self.memory = MemoryStore()
         self.current_context_mood = "NEUTRAL"
 
-        # Configuration & Speech
+        # Configuration MUST be loaded before anything that reads self.config
         self.load_config()
+
+        # AI Brain Integration
+        self.ai_comm = AICommunication()
+        self.ai_comm.response_received.connect(self.say)
+
+        api_key = self.config.get("api_keys", {}).get("gemini", "")
+        if api_key:
+            self.ai_brain = GeminiBrain(api_key=api_key)
+            print("[System] AI Brain initialized with Gemini.")
+        else:
+            self.ai_brain = None
+            print("[System] No Gemini API key found. AI speech disabled.")
+
+        # Speech
         self.speech_text = ""
         self.speech_timer = 0
         self.speech_duration = 0
@@ -581,17 +606,25 @@ class PetWindow(QWidget):
 
     def trigger_context_comment(self):
         """
-        Extracts the subject of the active window and generates a
-        dynamic comment based on the content.
+        Generates a reaction to the active window.
+        Uses Gemini AI if available, otherwise falls back to semantic templates.
         """
         subject = self.brain.get_content_subject()
         if not subject:
             return
 
-        subject_lower = subject.lower()
+        # 1. Try using True AI (Gemini)
+        if self.ai_brain:
+            # AI thinks in a background thread and calls 'self.say' via ai_comm signal
+            self.ai_brain.generate_reaction(
+                subject=subject,
+                mood=self.current_context_mood,
+                callback=self.ai_comm.response_received.emit
+            )
+            return
 
-        # Semantic Comment Mapping
-        # (Keyword in subject -> List of possible comments)
+        # 2. FALLBACK: Semantic Comment Mapping (If no API key)
+        subject_lower = subject.lower()
         comment_map = {
             "review": [
                 f"A {subject} review? Is it any good?",
@@ -625,14 +658,12 @@ class PetWindow(QWidget):
             ]
         }
 
-        # Find a match
         chosen_comment = None
         for keyword, comments in comment_map.items():
             if keyword in subject_lower:
                 chosen_comment = random.choice(comments)
                 break
 
-        # Generic fallback if no keyword matches but we have a subject
         if not chosen_comment:
             generic = [
                 f"What's this {subject} thing?",
@@ -1120,11 +1151,13 @@ class PetWindow(QWidget):
         """
         Picks a random dialogue line from config.json for the given event key
         (e.g. 'FEED', 'PLAY', 'NAP', 'WAKE') and displays it as a speech bubble.
+        Config stores dialogues under mood_mapping[key]["dialogue"].
         """
-        dialogues = self.config.get("dialogues", {})
-        lines = dialogues.get(event_key, [])
+        mood_map = self.config.get("mood_mapping", {})
+        entry = mood_map.get(event_key, {})
+        lines = entry.get("dialogue", [])
         if not lines:
-            # Fallback defaults if config is missing
+            # Fallback defaults if config key is missing
             defaults = {
                 "FEED": ["Yummy! Thanks!"],
                 "PLAY": ["Wheee! Let's go!"],
@@ -1133,7 +1166,7 @@ class PetWindow(QWidget):
             }
             lines = defaults.get(event_key, [])
         if lines:
-            self.say(random.choice(lines), duration=160)
+            self.say(random.choice(lines), duration=180)
 
     def feed_pet(self):
         self.hunger = max(0, self.hunger - 25)
