@@ -508,23 +508,70 @@ class PetWindow(QWidget):
         self.speech_timer = duration
         self.bubble_widget.show_speech(text, duration)
 
-    def trigger_speech(self, mood: str):
-        """Picks a random line from config for current mood and shows it."""
-        mood_data = self.config.get("mood_mapping", {}).get(mood, {})
-        dialogues = mood_data.get("dialogue", [])
+    def trigger_context_comment(self):
+        """
+        Extracts the subject of the active window and generates a
+        dynamic comment based on the content.
+        """
+        subject = self.brain.get_content_subject()
+        if not subject:
+            return
 
-        if isinstance(dialogues, str):
-            dialogues = [dialogues]
+        subject_lower = subject.lower()
 
-        if dialogues:
-            chosen = random.choice(dialogues)
-            duration = random.randint(130, 220)
-            self.say(chosen, duration)
-            pet_name = self.config.get('pet_settings', {}).get('name', 'Pixel')
-            try:
-                print(f"[Speech] {pet_name} says: {chosen}")
-            except Exception:
-                pass
+        # Semantic Comment Mapping
+        # (Keyword in subject -> List of possible comments)
+        comment_map = {
+            "review": [
+                f"A {subject} review? Is it any good?",
+                f"Hmm, I wonder if {subject} is actually worth it...",
+                f"I bet I could do a better review of {subject}!"
+            ],
+            "tutorial": [
+                f"Wow, learning about {subject}! You're getting so smart!",
+                f"I'm taking notes on this {subject} tutorial too!",
+                f"Look at you go! Master of {subject}!"
+            ],
+            "gameplay": [
+                f"{subject} looks fun! Can I have a turn?",
+                f"Ooh, {subject}! I bet I could beat that high score!",
+                f"Gaming time! I'll be your cheerleader for {subject}!"
+            ],
+            "music": [
+                f"This {subject} sounds amazing!",
+                f"Bop it! I love this {subject} vibe!",
+                f"Can you turn up the {subject}? I want to dance!"
+            ],
+            "coding": [
+                f"Working on {subject}? Don't forget the semicolons!",
+                f"Looking at {subject}... looks like a lot of bugs to me! Hehe!",
+                f"I'm helping you with {subject} just by looking at it!"
+            ],
+            "news": [
+                f"What's happening with {subject} now?",
+                f"The world is crazy, huh? {subject} is wild!",
+                f"I prefer my news in treats, not {subject}!"
+            ]
+        }
+
+        # Find a match
+        chosen_comment = None
+        for keyword, comments in comment_map.items():
+            if keyword in subject_lower:
+                chosen_comment = random.choice(comments)
+                break
+
+        # Generic fallback if no keyword matches but we have a subject
+        if not chosen_comment:
+            generic = [
+                f"What's this {subject} thing?",
+                f"Oh! {subject}! Tell me more about it!",
+                f"I've never heard of {subject}, is it tasty?",
+                f"You've been looking at {subject} for a while now!"
+            ]
+            chosen_comment = random.choice(generic)
+
+        self.say(chosen_comment, duration=250)
 
     # -------------------------------------------------------------
     # Main Heartbeat Update Loop
@@ -533,7 +580,7 @@ class PetWindow(QWidget):
         self.frame_count += 1
 
         # 1. Needs System Tick
-        if self.frame_count % 100 == 0:
+        if self.frame_count % 2000 == 0:
             self.hunger = min(100, self.hunger + 1)
         if self.frame_count % 200 == 0:
             if self.hunger > 60:
@@ -577,9 +624,9 @@ class PetWindow(QWidget):
                 self.current_context_mood = context_mood
                 print(f"[Brain] Pet noticed context change: {context_mood}")
 
-                # 35% chance to comment on the new context
+                # 35% chance to comment on the NEW content specifically
                 if random.random() < 0.35:
-                    self.trigger_speech(context_mood)
+                    self.trigger_context_comment()
 
                 # Behavioral Mapping (Option A)
                 if context_mood == "WATCHING":
@@ -967,20 +1014,20 @@ class PetWindow(QWidget):
         status_action.setEnabled(False)
 
         # Bonding & Memory header (Option C)
-        bond_action = menu.addAction(f"❤️ Bond: {self.memory.bond_level}%  |  ⭐ Fav: {self.memory.get_favorite_app()}")
+        bond_action = menu.addAction(f"Bond: {self.memory.bond_level}%  |  Fav: {self.memory.get_favorite_app()}")
         bond_action.setEnabled(False)
         menu.addSeparator()
 
-        feed_action = menu.addAction("Feed 🍎")
-        play_action = menu.addAction("Play 🧶")
-        
+        feed_action = menu.addAction("Feed [Apple]")
+        play_action = menu.addAction("Play [Ball]")
+
         if self.state == PetState.SLEEPING:
-            nap_action = menu.addAction("Wake Up ⏰")
+            nap_action = menu.addAction("Wake Up [Alarm]")
         else:
-            nap_action = menu.addAction("Nap 💤")
+            nap_action = menu.addAction("Nap [Zzz]")
 
         menu.addSeparator()
-        exit_action = menu.addAction("Exit ❌")
+        exit_action = menu.addAction("Exit [X]")
 
         action = menu.exec(event.globalPos())
         if action == feed_action:
@@ -998,6 +1045,25 @@ class PetWindow(QWidget):
     # -------------------------------------------------------------
     # Needs System Actions
     # -------------------------------------------------------------
+    def trigger_speech(self, event_key: str):
+        """
+        Picks a random dialogue line from config.json for the given event key
+        (e.g. 'FEED', 'PLAY', 'NAP', 'WAKE') and displays it as a speech bubble.
+        """
+        dialogues = self.config.get("dialogues", {})
+        lines = dialogues.get(event_key, [])
+        if not lines:
+            # Fallback defaults if config is missing
+            defaults = {
+                "FEED": ["Yummy! Thanks!"],
+                "PLAY": ["Wheee! Let's go!"],
+                "NAP": ["Yawn... sleepy..."],
+                "WAKE": ["I'm awake! I'm awake!"],
+            }
+            lines = defaults.get(event_key, [])
+        if lines:
+            self.say(random.choice(lines), duration=160)
+
     def feed_pet(self):
         self.hunger = max(0, self.hunger - 25)
         self.happiness = min(100, self.happiness + 15)

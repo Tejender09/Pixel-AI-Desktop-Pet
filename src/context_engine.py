@@ -40,11 +40,15 @@ class ContextEngine:
             "pycharm64.exe": "FOCUSED",
             "sublime_text.exe": "FOCUSED",
             "notepad++.exe": "FOCUSED",
+            "github": "FOCUSED",
+            "stackoverflow": "FOCUSED",
+            "vscode": "FOCUSED",
             # Music / Grooving
             "spotify.exe": "GROOVING",
             "music": "GROOVING",
             "soundcloud": "GROOVING",
             "apple music": "GROOVING",
+            "youtube music": "GROOVING",
             # Video / Cinema Watching
             "youtube": "WATCHING",
             "netflix": "WATCHING",
@@ -52,13 +56,15 @@ class ContextEngine:
             "disney": "WATCHING",
             "prime video": "WATCHING",
             "twitch": "WATCHING",
+            "movie": "WATCHING",
+            "cinema": "WATCHING",
             # Errors / Worried
             "error": "WORRIED",
             "bug": "WORRIED",
             "traceback": "WORRIED",
             "exception": "WORRIED",
             "failed": "WORRIED",
-            # Browsers / Curious
+            # Browsers / Curious (Fallback)
             "chrome.exe": "CURIOUS",
             "msedge.exe": "CURIOUS",
             "firefox.exe": "CURIOUS",
@@ -141,11 +147,13 @@ class ContextEngine:
         screen_w: int,
         screen_h: int,
         pet_w: int = 200,
-        pet_h: int = 200
+        pet_h: int = 200,
+        current_mood: str = "NEUTRAL"
     ) -> Optional[Tuple[int, int]]:
         """
         Calculates a random perch coordinate along the edges of the active window.
-        Returns (x, y) target position on the screen.
+        If current_mood is WATCHING or FOCUSED, it avoids the window entirely
+        to prevent blocking content.
         """
         import random
         info = self.get_active_window_info()
@@ -157,35 +165,70 @@ class ContextEngine:
         if win_w < 150 or win_h < 150 or (win_w >= screen_w and win_h >= screen_h):
             return None
 
+        # AI STEALTH MODE: If we are watching or focusing, do NOT perch on the window
+        if current_mood in ["WATCHING", "FOCUSED"]:
+            return None
+
         # Randomly choose which edge to perch on: 0=Top, 1=Left, 2=Right
         edge = random.randint(0, 2)
 
-        if edge == 0: # Top Edge: Random X along the top, Y just above the window
+        if edge == 0: # Top Edge
             target_x = random.randint(left, max(left, right - pet_w))
             target_y = top - pet_h + 20
-        elif edge == 1: # Left Edge: X just to the left, Random Y along the side
+        elif edge == 1: # Left Edge
             target_x = left - pet_w + 20
             target_y = random.randint(top, max(top, bottom - pet_h))
-        else: # Right Edge: X just to the right, Random Y along the side
+        else: # Right Edge
             target_x = right - 20
             target_y = random.randint(top, max(top, bottom - pet_h))
 
-        # Clamp strictly within screen bounds
         clamped_x = max(10, min(screen_w - pet_w - 10, target_x))
         clamped_y = max(10, min(screen_h - pet_h - 10, target_y))
         return (clamped_x, clamped_y)
 
     def get_window_center(self) -> Optional[Tuple[int, int]]:
         """
-        Returns global screen coordinates of the active window center
-        for natural companion gaze / sight tracking.
+        Returns the screen-space (x, y) center of the currently active window,
+        or None if the window geometry is unavailable or invalid.
+        Used by the pet for gaze tracking when the mouse is idle.
         """
         info = self.get_active_window_info()
         rect = info.get("rect", (0, 0, 0, 0))
         left, top, right, bottom = rect
-        if right > left and bottom > top:
-            return ((left + right) // 2, (top + bottom) // 2)
-        return None
+        w = right - left
+        h = bottom - top
+        if w < 50 or h < 50:
+            return None
+        cx = left + w // 2
+        cy = top + h // 2
+        return (cx, cy)
+
+    def get_content_subject(self) -> str:
+        """
+        Extracts the actual subject from the active window title by stripping
+        common browser and platform suffixes.
+        """
+        info = self.get_active_window_info()
+        title = info.get("title", "")
+        if not title:
+            return ""
+
+        # Common suffixes to strip
+        suffixes = [
+            " - YouTube", " - Mozilla Firefox", " - Google Chrome",
+            " - Microsoft Edge", " - Netflix", " - Twitch",
+            " - Spotify", " - Discord", " - VS Code", " - Visual Studio Code"
+        ]
+
+        subject = title
+        for s in suffixes:
+            if subject.endswith(s):
+                subject = subject.replace(s, "")
+                break
+
+        # Also strip common separators at the end
+        subject = subject.strip(" - |")
+        return subject
 
     def analyze_context(self) -> Optional[str]:
         """
@@ -194,7 +237,7 @@ class ContextEngine:
         """
         info = self.get_active_window_info()
         title = info.get("title", "").lower()
-        process = info.get("process", "")
+        process = info.get("process", "").lower()
 
         # Only trigger an update if the window actually changed
         if title == self.last_window_title and process == self.last_process:
@@ -203,12 +246,14 @@ class ContextEngine:
         self.last_window_title = title
         self.last_process = process
 
-        # 1. Check title keywords first for priority (e.g. YouTube in Chrome, Error in IDE)
+        # 1. PRIORITY: Check title keywords first.
+        # This handles YouTube/Netflix/etc inside Firefox/Chrome.
         for keyword, mood in self.app_moods.items():
+            # If it's a keyword (not a .exe), check if it's in the window title
             if not keyword.endswith(".exe") and keyword in title:
                 return mood
 
-        # 2. Check process name
+        # 2. FALLBACK: Check process name.
         if process in self.app_moods:
             return self.app_moods[process]
 
