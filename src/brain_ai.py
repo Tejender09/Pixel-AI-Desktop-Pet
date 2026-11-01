@@ -1,5 +1,5 @@
 import threading
-from typing import Callable
+from typing import Callable, Optional
 
 # Support both the current google-genai SDK and the deprecated google.generativeai
 try:
@@ -25,28 +25,38 @@ class GeminiBrain:
         self.api_key = api_key
         self.personality = personality
         self.is_thinking = False
+        self.candidate_models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"]
 
         if _USE_NEW_SDK:
             # Current SDK: google-genai
             self._client = _genai_new.Client(api_key=self.api_key)
-            self._model_name = "gemini-2.0-flash"
-            print("[AI] Using current google-genai SDK with gemini-2.0-flash")
+            self._model_name = "gemini-2.5-flash"
+            print("[AI] Using google-genai SDK with gemini-2.5-flash")
         elif _genai_old:
             # Legacy SDK: google.generativeai
             _genai_old.configure(api_key=self.api_key)
-            self._legacy_model = _genai_old.GenerativeModel("gemini-1.5-flash")
-            print("[AI] Using legacy google.generativeai SDK with gemini-1.5-flash")
+            self._legacy_model = None
+            for model_name in self.candidate_models:
+                try:
+                    self._legacy_model = _genai_old.GenerativeModel(model_name)
+                    print(f"[AI] Initialized Gemini model: {model_name}")
+                    break
+                except Exception:
+                    continue
+            if not self._legacy_model:
+                self._legacy_model = _genai_old.GenerativeModel("gemini-2.5-flash")
         else:
             raise ImportError(
                 "No Gemini SDK found. Install with: pip install google-genai"
             )
 
-    def generate_reaction(self, subject: str, mood: str, callback: Callable[[str], None]):
+    def generate_reaction(self, subject: str, mood: str, callback: Callable[[str], None], fallback_callback: Optional[Callable[[], None]] = None):
         """
         Generates a reaction in a background thread to avoid UI freezing.
         :param subject: The content the pet is seeing (e.g. 'iPhone 16 Review')
         :param mood: The current pet state (e.g. 'WATCHING')
         :param callback: Function to call with the response string
+        :param fallback_callback: Optional function to call if generation fails
         """
         if self.is_thinking:
             return
@@ -74,8 +84,8 @@ class GeminiBrain:
                 callback(text)
             except Exception as e:
                 print(f"[AI Error] {e}")
-                # Do not call callback on error — let the rule-based fallback in main.py handle it
-                # callback("Hmm... my brain is fuzzy!")
+                if fallback_callback:
+                    fallback_callback()
             finally:
                 self.is_thinking = False
 

@@ -607,87 +607,87 @@ class PetWindow(QWidget):
     def trigger_context_comment(self):
         """
         Generates a reaction to the active window.
-        Tries Gemini AI first. If AI is unavailable or its key is invalid,
-        falls back to rule-based semantic templates from config.json.
+        Uses Gemini AI if available. If AI is not available or encounters
+        an error, seamlessly falls back to rule-based semantic templates.
         """
         subject = self.brain.get_content_subject()
         if not subject:
             return
 
-        # 1. Try Gemini AI (runs in background thread, calls say() via signal when done)
-        #    Only attempt if ai_brain exists AND it's not already thinking.
-        #    If the API fails, generate_reaction() silently suppresses the callback,
-        #    so we ALSO show a rule-based comment immediately as a safe fallback.
+        def show_template_comment():
+            subject_lower = subject.lower()
+            comment_map = {
+                "review": [
+                    f"A {subject} review? Is it any good?",
+                    f"Hmm, I wonder if {subject} is worth it...",
+                    f"I bet I could do a better review of {subject}!"
+                ],
+                "tutorial": [
+                    f"Wow, learning about {subject}! So smart!",
+                    f"I'm taking notes on this {subject} tutorial too!",
+                    f"Look at you go! Master of {subject}!"
+                ],
+                "gameplay": [
+                    f"{subject} looks fun! Can I have a turn?",
+                    f"Ooh, {subject}! I'll be your cheerleader!",
+                    f"Gaming time! Go go go!"
+                ],
+                "music": [
+                    f"This {subject} sounds amazing!",
+                    f"Bop it! I love this {subject} vibe!",
+                    f"Can you turn up the {subject}? I want to dance!"
+                ],
+                "coding": [
+                    f"Working on {subject}? Don't forget the semicolons!",
+                    f"I see bugs in {subject}. Just kidding... maybe.",
+                    f"I'm helping with {subject} just by watching!"
+                ],
+                "news": [
+                    f"What's happening with {subject} now?",
+                    f"The world is wild, huh? {subject} is everywhere!",
+                    f"I prefer my news in treats, not {subject}!"
+                ],
+                "firebase": [
+                    f"Firebase! I know that one! Deploy!",
+                    f"Ooh, {subject}! Is it a serverless thing?",
+                    f"Cloud stuff! Very impressive!"
+                ],
+                "youtube": [
+                    f"YouTube! Watch something fun with me!",
+                    f"Ooh a video! I want to watch too!",
+                    f"Is this a good video? Tell me!"
+                ],
+            }
+
+            chosen_comment = None
+            for keyword, comments in comment_map.items():
+                if keyword in subject_lower:
+                    chosen_comment = random.choice(comments)
+                    break
+
+            if not chosen_comment:
+                generic = [
+                    f"What's this {subject} thing?",
+                    f"Oh! {subject}! Tell me more!",
+                    f"I've never heard of {subject}, is it tasty?",
+                    f"You've been on {subject} for a while now!",
+                ]
+                chosen_comment = random.choice(generic)
+
+            self.say(chosen_comment, duration=220)
+
+        # 1. Try Gemini AI (background thread; calls say via signal when ready)
         if self.ai_brain and not self.ai_brain.is_thinking:
             self.ai_brain.generate_reaction(
                 subject=subject,
                 mood=self.current_context_mood,
-                callback=self.ai_comm.response_received.emit
+                callback=self.ai_comm.response_received.emit,
+                fallback_callback=show_template_comment
             )
-            # Don't return — fall through to rule-based comment below as immediate fallback.
-            # If AI succeeds, its signal fires slightly later and replaces the bubble.
+            return
 
-        # 2. Rule-based Semantic Comment (immediate, always reliable)
-        subject_lower = subject.lower()
-        comment_map = {
-            "review": [
-                f"A {subject} review? Is it any good?",
-                f"Hmm, I wonder if {subject} is worth it...",
-                f"I bet I could do a better review of {subject}!"
-            ],
-            "tutorial": [
-                f"Wow, learning about {subject}! So smart!",
-                f"I'm taking notes on this {subject} tutorial too!",
-                f"Look at you go! Master of {subject}!"
-            ],
-            "gameplay": [
-                f"{subject} looks fun! Can I have a turn?",
-                f"Ooh, {subject}! I'll be your cheerleader!",
-                f"Gaming time! Go go go!"
-            ],
-            "music": [
-                f"This {subject} sounds amazing!",
-                f"Bop it! I love this {subject} vibe!",
-                f"Can you turn up the {subject}? I want to dance!"
-            ],
-            "coding": [
-                f"Working on {subject}? Don't forget the semicolons!",
-                f"I see bugs in {subject}. Just kidding... maybe.",
-                f"I'm helping with {subject} just by watching!"
-            ],
-            "news": [
-                f"What's happening with {subject} now?",
-                f"The world is wild, huh? {subject} is everywhere!",
-                f"I prefer my news in treats, not {subject}!"
-            ],
-            "firebase": [
-                f"Firebase! I know that one! Deploy!",
-                f"Ooh, {subject}! Is it a serverless thing?",
-                f"Cloud stuff! Very impressive!"
-            ],
-            "youtube": [
-                f"YouTube! Watch something fun with me!",
-                f"Ooh a video! I want to watch too!",
-                f"Is this a good video? Tell me!"
-            ],
-        }
-
-        chosen_comment = None
-        for keyword, comments in comment_map.items():
-            if keyword in subject_lower:
-                chosen_comment = random.choice(comments)
-                break
-
-        if not chosen_comment:
-            generic = [
-                f"What's this {subject} thing?",
-                f"Oh! {subject}! Tell me more!",
-                f"I've never heard of {subject}, is it tasty?",
-                f"You've been on {subject} for a while now!",
-            ]
-            chosen_comment = random.choice(generic)
-
-        self.say(chosen_comment, duration=220)
+        # 2. Rule-based Semantic Comment (immediate fallback)
+        show_template_comment()
 
     # -------------------------------------------------------------
     # Main Heartbeat Update Loop
