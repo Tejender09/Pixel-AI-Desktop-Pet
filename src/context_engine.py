@@ -1,20 +1,25 @@
 import os
 import sys
+import random
 from typing import Optional, Dict, Any, Tuple
 
-# Try importing pywin32 and psutil, otherwise fall back to built-in ctypes
-HAS_WIN32 = False
+# Try importing psutil independently for reliable process name resolution
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
+# Try importing pywin32, otherwise fall back to native ctypes
 try:
     import win32gui
     import win32process
-    import psutil
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False
 
 if sys.platform == "win32":
     import ctypes
-    from ctypes import wintypes
 
     class RECT(ctypes.Structure):
         _fields_ = [
@@ -79,6 +84,7 @@ class ContextEngine:
             "chrome.exe": "CURIOUS",
             "msedge.exe": "CURIOUS",
             "firefox.exe": "CURIOUS",
+            "brave.exe": "CURIOUS",
             "discord.exe": "SOCIAL"
         }
         self.last_window_title = ""
@@ -87,15 +93,19 @@ class ContextEngine:
     def get_active_window_info(self) -> Dict[str, Any]:
         """
         Retrieves the title, process name, and geometry rect of the currently focused window.
-        Uses pywin32 if available, or native Windows ctypes fallback.
+        Uses pywin32 if available, or native Windows ctypes + psutil fallback.
         """
         if HAS_WIN32:
             try:
                 hwnd = win32gui.GetForegroundWindow()
                 title = win32gui.GetWindowText(hwnd)
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                process = psutil.Process(pid)
-                process_name = process.name().lower()
+                process_name = ""
+                if HAS_PSUTIL and pid:
+                    try:
+                        process_name = psutil.Process(pid).name().lower()
+                    except Exception:
+                        pass
                 rect = win32gui.GetWindowRect(hwnd)
                 return {
                     "title": title,
@@ -123,19 +133,27 @@ class ContextEngine:
                     user32.GetWindowTextW(hwnd, buf, length + 1)
                     title = buf.value
 
-                # Process ID & Name
+                # Process ID & Name (using psutil first if available)
                 pid = ctypes.c_ulong()
                 user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
                 process_name = ""
+
                 if pid.value:
-                    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-                    h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
-                    if h_proc:
-                        name_buf = ctypes.create_unicode_buffer(1024)
-                        size = ctypes.c_ulong(1024)
-                        if kernel32.QueryFullProcessImageNameW(h_proc, 0, name_buf, ctypes.byref(size)):
-                            process_name = os.path.basename(name_buf.value).lower()
-                        kernel32.CloseHandle(h_proc)
+                    if HAS_PSUTIL:
+                        try:
+                            process_name = psutil.Process(pid.value).name().lower()
+                        except Exception:
+                            process_name = ""
+
+                    if not process_name:
+                        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                        h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+                        if h_proc:
+                            name_buf = ctypes.create_unicode_buffer(1024)
+                            size = ctypes.c_ulong(1024)
+                            if kernel32.QueryFullProcessImageNameW(h_proc, 0, name_buf, ctypes.byref(size)):
+                                process_name = os.path.basename(name_buf.value).lower()
+                            kernel32.CloseHandle(h_proc)
 
                 # Window Rect
                 r = RECT()
@@ -166,7 +184,6 @@ class ContextEngine:
         If current_mood is WATCHING or FOCUSED, it avoids the window entirely
         to prevent blocking content.
         """
-        import random
         info = self.get_active_window_info()
         rect = info.get("rect", (0, 0, 0, 0))
         left, top, right, bottom = rect
@@ -217,7 +234,7 @@ class ContextEngine:
     def get_content_subject(self) -> str:
         """
         Extracts the actual subject from the active window title by stripping
-        common browser and platform suffixes.
+        common browser and platform suffixes, as well as editor edit marks.
         """
         info = self.get_active_window_info()
         title = info.get("title", "")
@@ -227,18 +244,19 @@ class ContextEngine:
         # Common suffixes to strip
         suffixes = [
             " - YouTube", " - Mozilla Firefox", " - Google Chrome",
-            " - Microsoft Edge", " - Netflix", " - Twitch",
-            " - Spotify", " - Discord", " - VS Code", " - Visual Studio Code"
+            " - Microsoft Edge", " - Brave", " - Opera", " - Vivaldi",
+            " - Netflix", " - Twitch", " - Spotify", " - Discord",
+            " - VS Code", " - Visual Studio Code"
         ]
 
         subject = title
         for s in suffixes:
             if subject.endswith(s):
-                subject = subject.replace(s, "")
+                subject = subject[: -len(s)]
                 break
 
-        # Also strip common separators at the end
-        subject = subject.strip(" - |")
+        # Also strip common separators and editor modification symbols
+        subject = subject.strip(" - |*●•")
         return subject
 
     def is_audio_playing(self) -> bool:
@@ -248,6 +266,12 @@ class ContextEngine:
         Returns True if sound is actively playing, False if muted/paused/silent.
         """
         try:
+            import ctypes
+            try:
+                ctypes.windll.ole32.CoInitialize(None)
+            except Exception:
+                pass
+
             from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
             sessions = AudioUtilities.GetAllSessions()
             for s in sessions:
@@ -305,3 +329,18 @@ class ContextEngine:
             return mood
 
         return "NEUTRAL"
+
+
+if __name__ == "__main__":
+    engine = ContextEngine()
+    print("=" * 50)
+    print("ContextEngine Diagnostics")
+    print("=" * 50)
+    info = engine.get_active_window_info()
+    print(f"Active Window Title : '{info['title']}'")
+    print(f"Process Name        : '{info['process']}'")
+    print(f"Subject             : '{engine.get_content_subject()}'")
+    print(f"Audio Playing       : {engine.is_audio_playing()}")
+    print(f"Context Mood        : {engine.analyze_context()}")
+    print("=" * 50)
+    print("ContextEngine is working properly!")
