@@ -4,7 +4,12 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QRect
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from main import PetWindow, SpeechBubbleWidget
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+try:
+    from src.main import PetWindow, SpeechBubbleWidget
+except ImportError:
+    from main import PetWindow, SpeechBubbleWidget  # type: ignore
 
 app = QApplication.instance() or QApplication([])
 
@@ -17,9 +22,9 @@ def test_speech_bubble_functionality():
     assert not bubble.isVisible()
 
     # Trigger speech
-    pet.say("Testing speech bubble! 🐾", duration=50)
+    pet.say("Testing speech bubble!", duration=50)
     assert bubble.isVisible()
-    assert bubble.text == "Testing speech bubble! 🐾"
+    assert bubble.text == "Testing speech bubble!"
     assert bubble.bubble_w > 90
     assert bubble.bubble_h >= 36
 

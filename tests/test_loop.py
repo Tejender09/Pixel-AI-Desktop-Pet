@@ -6,7 +6,12 @@ from PyQt6.QtGui import QPaintEvent
 from PyQt6.QtCore import QRect
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from main import PetWindow, PetState
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+try:
+    from src.main import PetWindow, PetState
+except ImportError:
+    from main import PetWindow, PetState  # type: ignore
 
 app = QApplication.instance() or QApplication([])
 

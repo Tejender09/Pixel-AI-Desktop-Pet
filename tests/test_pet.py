@@ -5,8 +5,12 @@ from PyQt6.QtCore import Qt, QPoint, QRect
 
 # Ensure src is in pythonpath
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from main import PetWindow, AnimationManager, PetState
+try:
+    from src.main import PetWindow, AnimationManager, PetState
+except ImportError:
+    from main import PetWindow, AnimationManager, PetState  # type: ignore
 
 # Create or reuse QApplication instance for headless tests
 app = QApplication.instance()

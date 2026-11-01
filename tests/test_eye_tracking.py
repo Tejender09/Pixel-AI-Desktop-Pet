@@ -4,7 +4,12 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QPixmap, QColor
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from main import AnimationManager, PetState
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+try:
+    from src.main import AnimationManager, PetState
+except ImportError:
+    from main import AnimationManager, PetState  # type: ignore
 
 app = QApplication.instance() or QApplication([])
 

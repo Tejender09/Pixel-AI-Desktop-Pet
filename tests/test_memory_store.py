@@ -4,7 +4,11 @@ import tempfile
 import shutil
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from memory_store import MemoryStore
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+try:
+    from src.memory_store import MemoryStore
+except ImportError:
+    from memory_store import MemoryStore  # type: ignore
 
 def test_memory_store_lifecycle():
     temp_dir = tempfile.mkdtemp()

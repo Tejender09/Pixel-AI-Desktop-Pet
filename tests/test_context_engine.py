@@ -2,7 +2,11 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from context_engine import ContextEngine
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+try:
+    from src.context_engine import ContextEngine
+except ImportError:
+    from context_engine import ContextEngine  # type: ignore
 
 def test_context_engine_initialization():
     engine = ContextEngine()
