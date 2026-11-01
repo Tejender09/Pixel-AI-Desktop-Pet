@@ -18,6 +18,19 @@ try:
 except ImportError:
     HAS_WIN32 = False
 
+# Try importing pycaw for audio listening with fallback
+HAS_PYCAW = False
+try:
+    from pycaw.pycaw import AudioUtilities, IAudioMeterInformation  # type: ignore
+    HAS_PYCAW = True
+except Exception:
+    try:
+        from pycaw.utils import AudioUtilities  # type: ignore
+        from pycaw.constants import IAudioMeterInformation  # type: ignore
+        HAS_PYCAW = True
+    except Exception:
+        HAS_PYCAW = False
+
 if sys.platform == "win32":
     import ctypes
 
@@ -265,14 +278,16 @@ class ContextEngine:
         Inspects active audio sessions and peak volume via Windows Core Audio.
         Returns True if sound is actively playing, False if muted/paused/silent.
         """
-        try:
-            import ctypes
-            try:
-                ctypes.windll.ole32.CoInitialize(None)
-            except Exception:
-                pass
+        if not HAS_PYCAW:
+            return False
 
-            from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+        try:
+            if sys.platform == "win32":
+                try:
+                    ctypes.windll.ole32.CoInitialize(None)
+                except Exception:
+                    pass
+
             sessions = AudioUtilities.GetAllSessions()
             for s in sessions:
                 # State 1 = Active audio session
