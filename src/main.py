@@ -77,19 +77,33 @@ class SpeechBubbleWidget(QWidget):
         self.anim_tick = 0
         self.opacity = 0.0
 
-        # Calculate dimensions from font metrics
-        font_size = self.pet.config.get("visuals", {}).get("bubble_font_size", 11)
-        font = QFont("Segoe UI", font_size, QFont.Weight.DemiBold)
+        # Calculate dimensions from font metrics with max-width word wrap
+        font_size = self.pet.config.get("visuals", {}).get("bubble_font_size", 10)
+        font = QFont("Consolas", font_size, QFont.Weight.Bold)
+        font.setStyleHint(QFont.StyleHint.Monospace)
         metrics = QFontMetrics(font)
-        text_w = metrics.horizontalAdvance(text)
-        text_h = metrics.height()
 
-        pad_x = 16
+        # Max bubble content width (in pixels) before we wrap
+        MAX_TEXT_W = 220
+        pad_x = 14
         pad_y = 10
-        self.bubble_w = max(90, text_w + pad_x * 2)
-        self.bubble_h = max(36, text_h + pad_y * 2)
 
-        # Canvas includes padding for drop shadow and tail
+        raw_text_w = metrics.horizontalAdvance(text)
+        if raw_text_w <= MAX_TEXT_W:
+            # Single line - fits fine
+            self.bubble_w = max(90, raw_text_w + pad_x * 2)
+            self.bubble_h = max(36, metrics.height() + pad_y * 2)
+        else:
+            # Multi-line: measure bounding box with word wrap
+            self.bubble_w = MAX_TEXT_W + pad_x * 2
+            bound = metrics.boundingRect(
+                QRect(0, 0, MAX_TEXT_W, 2000),
+                int(Qt.AlignmentFlag.AlignLeft) | int(Qt.TextFlag.TextWordWrap),
+                text
+            )
+            self.bubble_h = max(36, bound.height() + pad_y * 2)
+
+        # Canvas includes padding for drop shadow (8px) and tail (10px)
         canvas_w = int(self.bubble_w + 24)
         canvas_h = int(self.bubble_h + 24)
         self.resize(canvas_w, canvas_h)
@@ -106,14 +120,21 @@ class SpeechBubbleWidget(QWidget):
         # Horizontally centered over pet
         bx = self.pet.x() + (self.pet.width() - self.width()) // 2
         # Positioned right above the grounded pet
-        by = self.pet.y() - self.height() + 25
+        by = self.pet.y() - self.height() + 22
 
-        # Screen edge safety clamping: if too close to top of monitor, shift downwards
+        # Clamp horizontally first so we know where the bubble actually lands
+        clamped_x = max(screen.x() + 8, min(screen.x() + screen.width() - self.width() - 8, bx))
+
+        # Screen edge safety clamping: if too close to top of monitor, shift below the pet instead
         if by < screen.y() + 8:
-            by = self.pet.y() + self.pet.height() - 15
+            by = self.pet.y() + self.pet.height() - 10
 
-        clamped_x = max(screen.x() + 10, min(screen.x() + screen.width() - self.width() - 10, bx))
         clamped_y = max(screen.y() + 8, min(screen.y() + screen.height() - self.height() - 10, by))
+
+        # Store the pet's center offset relative to THIS widget so tail can point at it
+        pet_center_x_global = self.pet.x() + self.pet.width() // 2
+        self._pet_offset_x = pet_center_x_global - clamped_x  # local x of pet center inside our canvas
+
         self.move(clamped_x, clamped_y)
 
     def tick(self):
@@ -171,9 +192,10 @@ class SpeechBubbleWidget(QWidget):
         bw = ((self.width() - 24) // P) * P
         bh = (self.bubble_h // P) * P
 
-        # Tail positioned to point down toward cat's head
-        tail_rel = int(bw * 0.35 if not self.pet.facing_right else bw * 0.65)
-        tail_cx = ((x + tail_rel) // P) * P
+        # Tail: points at actual pet center (tracked in update_position via _pet_offset_x)
+        pet_offset = getattr(self, '_pet_offset_x', self.width() // 2)
+        pet_offset = max(x + 4 * P, min(x + bw - 4 * P, pet_offset))
+        tail_cx = (pet_offset // P) * P
 
         border_hex = self.pet.config.get("visuals", {}).get("bubble_border_color", "#1A1C23")
         border_c = QColor(border_hex)
@@ -229,7 +251,15 @@ class SpeechBubbleWidget(QWidget):
 
         text_hex = self.pet.config.get("visuals", {}).get("bubble_text_color", "#1A1C23")
         painter.setPen(QColor(text_hex))
-        painter.drawText(QRect(x, y, bw, bh), Qt.AlignmentFlag.AlignCenter, self.text)
+
+        # Inner text rect (inset from border by 1 pixel block on each side)
+        inner_pad = 10
+        text_rect = QRect(x + inner_pad, y + inner_pad, bw - inner_pad * 2, bh - inner_pad * 2)
+        painter.drawText(
+            text_rect,
+            int(Qt.AlignmentFlag.AlignCenter) | int(Qt.TextFlag.TextWordWrap),
+            self.text
+        )
 
 
 class AnimationManager:
