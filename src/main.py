@@ -103,9 +103,12 @@ class SpeechBubbleWidget(QWidget):
             )
             self.bubble_h = max(36, bound.height() + pad_y * 2)
 
-        # Canvas includes padding for drop shadow (8px) and tail (10px)
+        # Canvas includes padding for shadow (8px each side) + tail space (10px)
+        # We add extra height for the tail regardless of direction —
+        # update_position decides which side it goes, paintEvent uses _tail_above flag
+        TAIL_EXTRA = 12
         canvas_w = int(self.bubble_w + 24)
-        canvas_h = int(self.bubble_h + 24)
+        canvas_h = int(self.bubble_h + 24 + TAIL_EXTRA)
         self.resize(canvas_w, canvas_h)
 
         self.update_position()
@@ -119,21 +122,23 @@ class SpeechBubbleWidget(QWidget):
 
         # Horizontally centered over pet
         bx = self.pet.x() + (self.pet.width() - self.width()) // 2
-        # Positioned right above the grounded pet
-        by = self.pet.y() - self.height() + 22
+        # Try to place bubble ABOVE the pet
+        by_above = self.pet.y() - self.height() + 16
 
-        # Clamp horizontally first so we know where the bubble actually lands
+        # If too close to top edge, place BELOW the pet instead
+        if by_above < screen.y() + 8:
+            by = self.pet.y() + self.pet.height() + 4
+            self._tail_above = False   # tail points UP (from bottom of bubble toward pet above)
+        else:
+            by = by_above
+            self._tail_above = True    # tail points DOWN (from bottom of bubble toward pet below)
+
         clamped_x = max(screen.x() + 8, min(screen.x() + screen.width() - self.width() - 8, bx))
+        clamped_y = max(screen.y() + 8, min(screen.y() + screen.height() - self.height() - 8, by))
 
-        # Screen edge safety clamping: if too close to top of monitor, shift below the pet instead
-        if by < screen.y() + 8:
-            by = self.pet.y() + self.pet.height() - 10
-
-        clamped_y = max(screen.y() + 8, min(screen.y() + screen.height() - self.height() - 10, by))
-
-        # Store the pet's center offset relative to THIS widget so tail can point at it
+        # Track pet center in local bubble coords so tail always points at the pet
         pet_center_x_global = self.pet.x() + self.pet.width() // 2
-        self._pet_offset_x = pet_center_x_global - clamped_x  # local x of pet center inside our canvas
+        self._pet_offset_x = pet_center_x_global - clamped_x
 
         self.move(clamped_x, clamped_y)
 
@@ -169,78 +174,115 @@ class SpeechBubbleWidget(QWidget):
             return
 
         painter = QPainter(self)
-        # 100% Sharp Pixel Art Rendering - No anti-aliasing or blurring!
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setOpacity(self.opacity)
 
         # Chunky pixel art unit: 2 screen pixels per retro pixel block
         P = 2
+        TAIL_H = 4 * P   # height of the 4-step pixel tail
 
         # Floating drift snapped to pixel grid
         float_y = int(math.sin(self.anim_tick * 0.1) * 2.0)
 
-        # Transform for elastic pop-in scale from bottom-center
-        cx = self.width() // 2
-        by_anchor = self.height() - 8
-        painter.translate(cx, by_anchor)
-        painter.scale(self.scale, self.scale)
-        painter.translate(-cx, -by_anchor)
+        # Is the bubble above (tail down) or below (tail up) the pet?
+        tail_above = getattr(self, '_tail_above', True)
 
-        # Geometry snapped to pixel grid
-        x = 12
-        y = 6 + float_y
-        bw = ((self.width() - 24) // P) * P
+        # Scale anchor at the edge closest to the pet
+        cx = self.width() // 2
+        scale_anchor_y = (self.height() - 8) if tail_above else 8
+        painter.translate(cx, scale_anchor_y)
+        painter.scale(self.scale, self.scale)
+        painter.translate(-cx, -scale_anchor_y)
+
+        # Geometry — leave room for tail on the correct side
+        margin_x = 12
+        if tail_above:
+            # Tail hangs below the box
+            bx = margin_x
+            by = 6 + float_y
+        else:
+            # Tail pokes above the box
+            bx = margin_x
+            by = TAIL_H + 6 + float_y
+
+        bw = ((self.width() - margin_x * 2) // P) * P
         bh = (self.bubble_h // P) * P
 
-        # Tail: points at actual pet center (tracked in update_position via _pet_offset_x)
+        # Tail X: track actual pet center in local coords, clamped inside box
         pet_offset = getattr(self, '_pet_offset_x', self.width() // 2)
-        pet_offset = max(x + 4 * P, min(x + bw - 4 * P, pet_offset))
+        pet_offset = max(bx + 4 * P, min(bx + bw - 4 * P, pet_offset))
         tail_cx = (pet_offset // P) * P
 
         border_hex = self.pet.config.get("visuals", {}).get("bubble_border_color", "#1A1C23")
         border_c = QColor(border_hex)
         bg_hex = self.pet.config.get("visuals", {}).get("bubble_color", "#FFFFFF")
         bg_c = QColor(bg_hex)
-        shadow_c = QColor(0, 0, 0, 75)
+        shadow_c = QColor(0, 0, 0, 80)
 
-        # Helper to draw the authentic stepped pixel balloon silhouette
-        def draw_pixel_silhouette(p, ox, oy, fill_color):
+        tx_rel = tail_cx - bx   # tail center relative to box left
+
+        def draw_box_body(p, ox, oy, w, h):
+            """Stepped pixel corners for the main balloon box."""
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(fill_color)
-            # Main box body & stepped pixel corners
-            p.drawRect(ox, oy + 2 * P, bw, bh - 4 * P)
-            p.drawRect(ox + P, oy + P, bw - 2 * P, bh - 2 * P)
-            p.drawRect(ox + 2 * P, oy, bw - 4 * P, bh)
-            # Stepped pointed tail (4 descending chunky pixel steps)
-            tx = ox + (tail_cx - x)
-            ty = oy + bh
-            p.drawRect(tx - 3 * P, ty, 7 * P, P)
-            p.drawRect(tx - 2 * P, ty + P, 5 * P, P)
-            p.drawRect(tx - 1 * P, ty + 2 * P, 3 * P, P)
-            p.drawRect(tx, ty + 3 * P, P, P)
+            p.drawRect(ox,           oy + 2 * P, w,         h - 4 * P)
+            p.drawRect(ox + P,       oy + P,     w - 2 * P, h - 2 * P)
+            p.drawRect(ox + 2 * P,   oy,         w - 4 * P, h)
 
-        # 1. Pixel Art Drop Shadow (blocky offset, unblurred)
-        draw_pixel_silhouette(painter, x + 2 * P, y + 2 * P, shadow_c)
+        def draw_tail_down(p, ox, oy, w, h):
+            """4-step descending pixel tail at bottom of box."""
+            tx = ox + tx_rel
+            ty = oy + h
+            p.drawRect(tx - 3 * P, ty,           7 * P, P)
+            p.drawRect(tx - 2 * P, ty + P,       5 * P, P)
+            p.drawRect(tx - 1 * P, ty + 2 * P,   3 * P, P)
+            p.drawRect(tx,         ty + 3 * P,   P,     P)
 
-        # 2. Outer Pixel Border (chunky 2px solid dark outline)
-        draw_pixel_silhouette(painter, x, y, border_c)
+        def draw_tail_up(p, ox, oy, w, h):
+            """4-step ascending pixel tail at top of box (bubble is below pet)."""
+            tx = ox + tx_rel
+            ty = oy
+            p.drawRect(tx,         ty - 4 * P, P,     P)
+            p.drawRect(tx - P,     ty - 3 * P, 3 * P, P)
+            p.drawRect(tx - 2 * P, ty - 2 * P, 5 * P, P)
+            p.drawRect(tx - 3 * P, ty - P,     7 * P, P)
 
-        # 3. Inner Fill (solid background overlapping the junction seamlessly - ZERO seam line!)
-        ibx = x + P
-        iby = y + P
+        draw_tail = draw_tail_down if tail_above else draw_tail_up
+
+        def draw_silhouette(p, ox, oy, fill):
+            p.setBrush(fill)
+            draw_box_body(p, ox, oy, bw, bh)
+            draw_tail(p, ox, oy, bw, bh)
+
+        # 1. Shadow
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(shadow_c)
+        draw_silhouette(painter, bx + 2 * P, by + 2 * P, shadow_c)
+
+        # 2. Outer border
+        painter.setBrush(border_c)
+        draw_silhouette(painter, bx, by, border_c)
+
+        # 3. Inner fill (inset by 1 pixel block)
         ibw = bw - 2 * P
         ibh = bh - 2 * P
-        painter.setPen(Qt.PenStyle.NoPen)
+        ibx = bx + P
+        iby = by + P
+
         painter.setBrush(bg_c)
-        painter.drawRect(ibx, iby + 2 * P, ibw, ibh - 4 * P)
-        painter.drawRect(ibx + P, iby + P, ibw - 2 * P, ibh - 2 * P)
-        painter.drawRect(ibx + 2 * P, iby, ibw - 4 * P, ibh)
-        # Inner tail cutting seamlessly through the outer border
-        tx = tail_cx
-        ty = y + bh
-        painter.drawRect(tx - 2 * P, ty - P, 5 * P, 2 * P)
-        painter.drawRect(tx - 1 * P, ty + P, 3 * P, P)
-        painter.drawRect(tx, ty + 2 * P, P, P)
+        draw_box_body(painter, ibx, iby, ibw, ibh)
+
+        # Inner tail (1 step shorter to reveal the border ring)
+        itx = tail_cx - bx   # reuse relative offset
+        if tail_above:
+            ty = iby + ibh
+            painter.drawRect(ibx + itx - 2 * P, ty - P,       5 * P, 2 * P)
+            painter.drawRect(ibx + itx - 1 * P, ty + P,       3 * P, P)
+            painter.drawRect(ibx + itx,          ty + 2 * P,  P,     P)
+        else:
+            ty = iby
+            painter.drawRect(ibx + itx,          ty - 3 * P, P,     P)
+            painter.drawRect(ibx + itx - 1 * P,  ty - 2 * P, 3 * P, P)
+            painter.drawRect(ibx + itx - 2 * P,  ty - P,     5 * P, 2 * P)
 
         # 4. Pixelated Typography
         font_size = self.pet.config.get("visuals", {}).get("bubble_font_size", 10)
@@ -252,9 +294,8 @@ class SpeechBubbleWidget(QWidget):
         text_hex = self.pet.config.get("visuals", {}).get("bubble_text_color", "#1A1C23")
         painter.setPen(QColor(text_hex))
 
-        # Inner text rect (inset from border by 1 pixel block on each side)
         inner_pad = 10
-        text_rect = QRect(x + inner_pad, y + inner_pad, bw - inner_pad * 2, bh - inner_pad * 2)
+        text_rect = QRect(bx + inner_pad, by + inner_pad, bw - inner_pad * 2, bh - inner_pad * 2)
         painter.drawText(
             text_rect,
             int(Qt.AlignmentFlag.AlignCenter) | int(Qt.TextFlag.TextWordWrap),
