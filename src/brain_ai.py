@@ -1,4 +1,6 @@
 import os
+import re
+import time
 import json
 import threading
 from typing import Callable, Optional
@@ -81,6 +83,11 @@ class GeminiBrain:
         self.is_thinking = False
         self.candidate_models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"]
 
+        # Rate-limit guard: free tier = 5 req/min; stay safely under at 4/min
+        self._rate_limit_per_minute: int = 4
+        self._request_timestamps: list = []     # timestamps of recent API calls
+        self._rate_limited_until: float = 0.0   # Unix timestamp of cooldown expiry
+
         if _USE_NEW_SDK:
             # Current SDK: google-genai
             self._client = _genai_new.Client(api_key=self.api_key)
@@ -115,6 +122,25 @@ class GeminiBrain:
         if self.is_thinking:
             return
 
+        # --- Rate-limit pre-check ---
+        now = time.time()
+        if now < self._rate_limited_until:
+            remaining = int(self._rate_limited_until - now)
+            print(f"[AI] Skipping (rate limited, {remaining}s cooldown left)")
+            if fallback_callback:
+                fallback_callback()
+            return
+
+        # Prune timestamps older than 60 seconds
+        self._request_timestamps = [t for t in self._request_timestamps if now - t < 60]
+        if len(self._request_timestamps) >= self._rate_limit_per_minute:
+            print(f"[AI] Skipping (hit {self._rate_limit_per_minute} req/min cap)")
+            if fallback_callback:
+                fallback_callback()
+            return
+        # Record this call
+        self._request_timestamps.append(now)
+
         def _think():
             self.is_thinking = True
             try:
@@ -143,7 +169,14 @@ class GeminiBrain:
                 print(f"[AI] Gemini spoke: \"{text}\"")
                 callback(text)
             except Exception as e:
-                print(f"[AI Error] {e}")
+                err_str = str(e)
+                print(f"[AI Error] {err_str}")
+                if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
+                    # Parse retry_delay from the error message if present
+                    match = re.search(r'retry.*?(\d+).*?second', err_str, re.IGNORECASE)
+                    wait = int(match.group(1)) + 10 if match else 70
+                    self._rate_limited_until = time.time() + wait
+                    print(f"[AI] Rate limited by API. Cooling down for {wait}s.")
                 if fallback_callback:
                     fallback_callback()
             finally:

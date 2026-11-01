@@ -740,8 +740,8 @@ class PetWindow(QWidget):
                 self.current_context_mood = context_mood
                 print(f"[Brain] Pet noticed context change: {context_mood}")
 
-                # 35% chance to comment on the NEW content specifically
-                if random.random() < 0.35:
+                # 15% chance to comment on the NEW content specifically (was 35%; reduced to stay under free-tier quota)
+                if random.random() < 0.15:
                     self.trigger_context_comment()
 
                 # Behavioral Mapping (Option A)
