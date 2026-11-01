@@ -607,39 +607,43 @@ class PetWindow(QWidget):
     def trigger_context_comment(self):
         """
         Generates a reaction to the active window.
-        Uses Gemini AI if available, otherwise falls back to semantic templates.
+        Tries Gemini AI first. If AI is unavailable or its key is invalid,
+        falls back to rule-based semantic templates from config.json.
         """
         subject = self.brain.get_content_subject()
         if not subject:
             return
 
-        # 1. Try using True AI (Gemini)
-        if self.ai_brain:
-            # AI thinks in a background thread and calls 'self.say' via ai_comm signal
+        # 1. Try Gemini AI (runs in background thread, calls say() via signal when done)
+        #    Only attempt if ai_brain exists AND it's not already thinking.
+        #    If the API fails, generate_reaction() silently suppresses the callback,
+        #    so we ALSO show a rule-based comment immediately as a safe fallback.
+        if self.ai_brain and not self.ai_brain.is_thinking:
             self.ai_brain.generate_reaction(
                 subject=subject,
                 mood=self.current_context_mood,
                 callback=self.ai_comm.response_received.emit
             )
-            return
+            # Don't return — fall through to rule-based comment below as immediate fallback.
+            # If AI succeeds, its signal fires slightly later and replaces the bubble.
 
-        # 2. FALLBACK: Semantic Comment Mapping (If no API key)
+        # 2. Rule-based Semantic Comment (immediate, always reliable)
         subject_lower = subject.lower()
         comment_map = {
             "review": [
                 f"A {subject} review? Is it any good?",
-                f"Hmm, I wonder if {subject} is actually worth it...",
+                f"Hmm, I wonder if {subject} is worth it...",
                 f"I bet I could do a better review of {subject}!"
             ],
             "tutorial": [
-                f"Wow, learning about {subject}! You're getting so smart!",
+                f"Wow, learning about {subject}! So smart!",
                 f"I'm taking notes on this {subject} tutorial too!",
                 f"Look at you go! Master of {subject}!"
             ],
             "gameplay": [
                 f"{subject} looks fun! Can I have a turn?",
-                f"Ooh, {subject}! I bet I could beat that high score!",
-                f"Gaming time! I'll be your cheerleader for {subject}!"
+                f"Ooh, {subject}! I'll be your cheerleader!",
+                f"Gaming time! Go go go!"
             ],
             "music": [
                 f"This {subject} sounds amazing!",
@@ -648,14 +652,24 @@ class PetWindow(QWidget):
             ],
             "coding": [
                 f"Working on {subject}? Don't forget the semicolons!",
-                f"Looking at {subject}... looks like a lot of bugs to me! Hehe!",
-                f"I'm helping you with {subject} just by looking at it!"
+                f"I see bugs in {subject}. Just kidding... maybe.",
+                f"I'm helping with {subject} just by watching!"
             ],
             "news": [
                 f"What's happening with {subject} now?",
-                f"The world is crazy, huh? {subject} is wild!",
+                f"The world is wild, huh? {subject} is everywhere!",
                 f"I prefer my news in treats, not {subject}!"
-            ]
+            ],
+            "firebase": [
+                f"Firebase! I know that one! Deploy!",
+                f"Ooh, {subject}! Is it a serverless thing?",
+                f"Cloud stuff! Very impressive!"
+            ],
+            "youtube": [
+                f"YouTube! Watch something fun with me!",
+                f"Ooh a video! I want to watch too!",
+                f"Is this a good video? Tell me!"
+            ],
         }
 
         chosen_comment = None
@@ -667,13 +681,13 @@ class PetWindow(QWidget):
         if not chosen_comment:
             generic = [
                 f"What's this {subject} thing?",
-                f"Oh! {subject}! Tell me more about it!",
+                f"Oh! {subject}! Tell me more!",
                 f"I've never heard of {subject}, is it tasty?",
-                f"You've been looking at {subject} for a while now!"
+                f"You've been on {subject} for a while now!",
             ]
             chosen_comment = random.choice(generic)
 
-        self.say(chosen_comment, duration=250)
+        self.say(chosen_comment, duration=220)
 
     # -------------------------------------------------------------
     # Main Heartbeat Update Loop

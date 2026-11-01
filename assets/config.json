@@ -111,5 +111,8 @@
     "bubble_text_color": "#1A1C23",
     "bubble_border_color": "#1A1C23",
     "bubble_font_size": 10
+  },
+  "api_keys": {
+    "gemini": ""
   }
 }

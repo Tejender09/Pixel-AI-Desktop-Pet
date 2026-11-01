@@ -74,7 +74,8 @@ class GeminiBrain:
                 callback(text)
             except Exception as e:
                 print(f"[AI Error] {e}")
-                callback("Hmm... my brain is fuzzy!")
+                # Do not call callback on error — let the rule-based fallback in main.py handle it
+                # callback("Hmm... my brain is fuzzy!")
             finally:
                 self.is_thinking = False
 
