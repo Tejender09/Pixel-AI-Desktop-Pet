@@ -52,8 +52,8 @@ Built with **PyQt6** and powered by **Google Gemini AI**, Pixel watches your act
 
 ### Install Dependencies
 ```bash
-git clone https://github.com/Tejender09/desktop_pet.git
-cd desktop_pet
+git clone https://github.com/Tejender09/Pixel-AI-Desktop-Pet.git
+cd Pixel-AI-Desktop-Pet
 pip install -r requirements.txt
 ```
 
